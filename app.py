@@ -4,13 +4,16 @@ Run locally:   streamlit run app.py
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from explorer import api, sources
-from explorer.annotate import leaders, leaders_html, quadrant_html, quadrant_labels
+from explorer import api, sources, spanish
+from explorer.annotate import (BADGE_FONT, badge_fill, leaders, leaders_html, quadrant_labels,
+                               round_label)
 from explorer.bayes import eb_beta_binomial, eb_normal, ellipse_path, ellipse_scale
 from explorer.metrics import (PLAYER_METRICS, TEAM_METRICS, evaluate, player_totals,
                               team_totals)
@@ -24,6 +27,9 @@ SOCIAL_EXPORT = True
 # ──────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Basketball 2D Explorer", page_icon="🏀", layout="wide")
+# Condensed sports font for the quadrant badges (falls back to system fonts).
+st.markdown('<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700'
+            '&display=swap" rel="stylesheet">', unsafe_allow_html=True)
 
 CURRENT_SEASON = 2026
 SHRINK = {"prop": eb_beta_binomial, "normal": eb_normal}
@@ -54,7 +60,7 @@ def load_demo():
 with st.sidebar:
     st.title("🏀 2D Explorer")
     source = st.radio("Data source", ["EuroLeague API", "EuroCup API", "NBA (stats.nba.com)",
-                                      "Your CSV files", "Demo (fictional)"])
+                                      "Your files (ACB, Primera FEB, any league)", "Demo (fictional)"])
     league, game_length = "EUROLEAGUE", 40
     if source in ("EuroLeague API", "EuroCup API", "NBA (stats.nba.com)"):
         season = st.selectbox("Season", list(range(CURRENT_SEASON, 2015, -1)), format_func=season_label)
@@ -63,14 +69,39 @@ with st.sidebar:
     if source == "NBA (stats.nba.com)":
         league, game_length = "NBA", 48
         season_type = st.selectbox("Season type", ["Regular Season", "Playoffs"])
-    if source == "Your CSV files":
-        st.caption("Any league (ACB, NBA, BCL…): fill in the templates and upload them.")
-        st.download_button("Team template", sources.team_template(), "teams_template.csv", "text/csv")
-        st.download_button("Player template", sources.player_template(), "players_template.csv", "text/csv")
-        team_file = st.file_uploader("Team CSV", type="csv")
-        player_file = st.file_uploader("Player CSV (optional)", type="csv")
-        league = st.selectbox("League (names and colors)", ["ACB", "NBA", "EUROLEAGUE", "CUSTOM"])
+    if source.startswith("Your files"):
+        league = st.selectbox("League (names and colors)", ["ACB", "PRIMERA FEB", "NBA", "EUROLEAGUE", "CUSTOM"])
         game_length = 48 if league == "NBA" else 40
+        data_dir = Path("data")
+        saved = sorted(f.name[:-len("_teams.csv")] for f in data_dir.glob("*_teams.csv")) if data_dir.exists() else []
+        file_format = st.radio("File format", (["Saved in data/ folder"] if saved else [])
+                               + ["App template (CSV)", "Season tables (Spanish or English)", "Team game log"],
+                               help="Season tables: a page saved from the league website (HTML), Excel or CSV, "
+                                    "with Spanish headers (PTS, T2, T3, TL, RO, RD, AS, BR, BP, VAL) or English ones. "
+                                    "Team game log: one row per team and game, with a game id.")
+        kinds = ["csv", "html", "htm", "xlsx", "xls"]
+        if file_format == "Saved in data/ folder":
+            dataset = st.selectbox("Dataset", saved, help="CSV files in data/ named <name>_teams.csv (and <name>_players.csv), e.g. "
+                                                          "from pipelines/import_spanish_stats.py.")
+            team_file = data_dir / f"{dataset}_teams.csv"
+            opp_file = None
+        elif file_format == "App template (CSV)":
+            st.download_button("Team template", sources.team_template(), "teams_template.csv", "text/csv")
+            st.download_button("Player template", sources.player_template(), "players_template.csv", "text/csv")
+            team_file = st.file_uploader("Team CSV", type="csv")
+            opp_file = None
+        elif file_format.startswith("Season tables"):
+            team_file = st.file_uploader("Team stats (own)", type=kinds)
+            opp_file = st.file_uploader("Opponent stats", type=kinds)
+            values_kind = st.radio("Values are", ["Per-game averages", "Season totals"], horizontal=True)
+        else:
+            team_file = st.file_uploader("Team game log", type=kinds)
+            opp_file = None
+        if file_format == "Saved in data/ folder":
+            player_file = data_dir / f"{dataset}_players.csv"
+            player_file = player_file if player_file.exists() else None
+        else:
+            player_file = st.file_uploader("Player stats (optional)", type=kinds)
     if source == "EuroCup API":
         league = "EUROCUP"
     if source.startswith("Demo"):
@@ -88,12 +119,22 @@ try:
     elif source == "NBA (stats.nba.com)":
         teams, opp, players = load_nba(season, season_type)
         context = f"NBA {season_label(season)} · {season_type}"
-    elif source == "Your CSV files":
-        if team_file is None:
-            st.info("Upload a team CSV (download the template in the sidebar) to start.")
+    elif source.startswith("Your files"):
+        if team_file is None or (file_format.startswith("Season tables") and opp_file is None):
+            st.info("Upload your files in the sidebar to start. Season tables need two files: "
+                    "your teams' own stats and their opponents' stats.")
             st.stop()
-        teams, opp, players = sources.from_csv(team_file, player_file)
-        context = f"{league.title()} · custom data"
+        if file_format in ("App template (CSV)", "Saved in data/ folder"):
+            teams, opp, players = sources.from_csv(team_file, player_file)
+        elif file_format.startswith("Season tables"):
+            teams, opp, players = spanish.from_season_tables(
+                team_file, opp_file, player_file,
+                values="totals" if values_kind == "Season totals" else "averages")
+        else:
+            teams, opp, players = spanish.from_game_log(team_file, player_file)
+        context = {"ACB": "Liga Endesa ACB", "PRIMERA FEB": "Primera FEB"}.get(league, league.title())
+        if file_format == "Saved in data/ folder" and dataset.split("_")[-1].isdigit():
+            context += f" {season_label(int(dataset.split('_')[-1]))}"
     else:
         teams, opp, players = load_demo()
         context = "Demo data (fictional teams and players)"
@@ -105,6 +146,12 @@ if teams is None or teams.empty:
     st.warning("No data for this selection yet. Try the previous season.")
     st.stop()
 
+# Round reached in this competition: the most games played by any team.
+games_played = int(np.nanmax(pd.to_numeric(teams["games"], errors="coerce")))
+phase_code = api.PHASES.get(phase_name) if source in ("EuroLeague API", "EuroCup API") else None
+playoffs = phase_code == "PO" or (source == "NBA (stats.nba.com)" and season_type == "Playoffs")
+auto_round = round_label(games_played, league, playoffs)
+
 # ───────────────────────────────────────────────────────── build the frame
 if level == "Teams":
     frame = team_totals(teams, opp, game_length=game_length)
@@ -113,16 +160,22 @@ if level == "Teams":
     full_names = frame["name"].astype(str)
     short_names = pd.Series([short_name(c, n, league) for c, n in zip(codes, full_names)], index=frame.index)
     crest_urls = frame["crest_url"]
-    colors = [chart_color(c, league) for c in codes]
+    photo_urls = pd.Series(None, index=frame.index)
+    colors = [chart_color(c, league, n) for c, n in zip(codes, full_names)]
 else:
     if players is None or players.empty:
         st.warning("No player data for this source.")
         st.stop()
-    frame = player_totals(players, teams)
+    frame = player_totals(players, teams, opp)
+    max_games = max(int(np.nanmax(frame["games"])), 1)
+    max_mpg = max(int(np.ceil(np.nanmax(frame["min_pg"]))), 1)
     with st.sidebar:
-        min_mpg = st.slider("Min. minutes per game", 0, 30, 12)
-        min_games = st.slider("Min. games", 1, 40, 5)
-        team_sel = st.multiselect("Teams", sorted(frame["team_code"].unique()), placeholder="All teams")
+        min_mpg = st.slider("Min. minutes per game", 0, max_mpg, min(12, max_mpg))
+        min_games = st.slider("Min. games", 1, max_games, min(5, max_games),
+                              help=f"Up to {max_games} games played in this selection.")
+        team_names = dict(zip(teams["team_code"], teams["team_name"]))
+        team_sel = st.multiselect("Teams", sorted(frame["team_code"].dropna().unique()), placeholder="All teams",
+                                  format_func=lambda c: short_name(c, team_names.get(c, c), league))
     frame = frame[(frame.min_pg >= min_mpg) & (frame.games >= min_games)]
     if team_sel:
         frame = frame[frame.team_code.isin(team_sel)]
@@ -134,8 +187,10 @@ else:
                                    else " ".join(reversed([p.strip().title() for p in str(n).split(",", 1)])))
     short_names = frame["name"].map(api.display_name)
     codes = frame["team_code"]
-    crest_urls = pd.Series(None, index=frame.index)
-    colors = [chart_color(c, league) for c in codes]
+    crest_urls = frame["crest_url"]
+    photo_urls = frame["photo_url"]
+    team_full = codes.map(lambda c: team_names.get(c, c))
+    colors = [chart_color(c, league, n) for c, n in zip(codes, team_full)]
 
 # Keep only metrics that have data in this source (e.g. no PIR in the NBA).
 registry = [m for m in registry if np.isfinite(evaluate(m, frame, SHRINK)["observed"]).any()]
@@ -148,8 +203,13 @@ with st.sidebar:
     if level == "Teams":
         label_mode = st.radio("Team labels", ["Short name", "Full name", "Code", "Crest", "None"])
     else:
-        label_mode = st.radio("Player labels", ["Short name", "Full name", "None"])
-    show_ellipses = st.toggle("Uncertainty ellipses", value=True)
+        label_mode = st.radio("Player labels", ["Short name", "Full name", "Photo", "Team crest", "None"],
+                              help="Photos and crests appear when the data source provides them "
+                                   "(EuroLeague and NBA, or photo_url / crest_url columns in your files).")
+    ellipse_mode = st.radio("Uncertainty ellipses", ["All", "Choose", "None"], horizontal=True,
+                            index=0 if level == "Teams" else 1,
+                            help="'Choose' lets you pick which teams or players get an ellipse.")
+    show_ellipses = ellipse_mode != "None"
     ci_level = st.select_slider("Credible level", options=["50%", "68%", "95%"], value="68%",
                                 disabled=not show_ellipses)
     estimate = st.radio("Points show", ["Observed", "Bayes-adjusted"], horizontal=True)
@@ -157,13 +217,23 @@ with st.sidebar:
     show_medians = st.checkbox("League medians", value=True)
     show_quadrants = st.checkbox("Quadrant legend", value=True)
     show_leaders = st.checkbox("Top 3 / bottom 3", value=True)
+    round_text = st.text_input("Round label", auto_round,
+                               help="Worked out from games played. Edit it, or leave it empty to hide it.")
 
-labels = {"Short name": short_names, "Full name": full_names, "Code": codes,
-          "Crest": short_names, "None": short_names}[label_mode]
+labels = {"Short name": short_names, "Full name": full_names, "Code": codes}.get(label_mode, short_names)
+image_urls = {"Crest": crest_urls, "Team crest": crest_urls, "Photo": photo_urls}.get(label_mode)
+image_kind = "photo" if label_mode == "Photo" else "crest"
+use_images = image_urls is not None and image_urls.notna().any()
+if image_urls is not None and not use_images:
+    st.sidebar.caption("No images in this data source: showing names instead.")
 
 # ───────────────────────────────────────────────────────────────── controls
 st.title("Basketball 2D Explorer")
-st.caption(f"{context} · season totals · uncertainty from an empirical-Bayes model")
+round_html = (f"<span style='font-family:{BADGE_FONT};font-weight:700;letter-spacing:.12em;"
+              f"background:#FFB000;color:#111;padding:2px 10px;border-radius:12px;font-size:0.85rem'>"
+              f"{round_text.upper()}</span> &nbsp;" if round_text else "")
+st.markdown(f"{round_html}<span style='opacity:.7'>{context} · season totals · "
+            "uncertainty from an empirical-Bayes model</span>", unsafe_allow_html=True)
 
 c1, c2 = st.columns(2)
 default_x, default_y = ("Offensive rating", "Defensive rating") if level == "Teams" else ("USG%", "TS%")
@@ -174,6 +244,11 @@ my = by_label[c2.selectbox("Y axis", list(by_label), index=list(by_label).index(
 inv_x = c1.checkbox("Reverse X (better to the right)", value=mx.better == "low")
 inv_y = c2.checkbox("Reverse Y (better at the top)", value=my.better == "low")
 highlight = st.multiselect("Highlight", sorted(labels.unique()))
+if ellipse_mode == "Choose":
+    ellipse_for = st.multiselect("Show ellipses for", sorted(labels.unique()), default=highlight,
+                                 placeholder="Pick teams or players (highlighted ones are added by default)")
+else:
+    ellipse_for = []
 
 # ──────────────────────────────────────────────────────────────────── compute
 ex = evaluate(mx, frame, SHRINK)
@@ -182,9 +257,10 @@ col = "adjusted" if estimate == "Bayes-adjusted" else "observed"
 x, y = ex[col], ey[col]
 is_hl = labels.isin(highlight).to_numpy() if highlight else np.zeros(len(frame), bool)
 k = ellipse_scale(int(ci_level.rstrip("%")) / 100)
-ellipse_all = level == "Teams" or not highlight
+want_ellipse = (labels.isin(ellipse_for).to_numpy() if ellipse_mode == "Choose"
+                else np.full(len(frame), ellipse_mode == "All"))
 quads = quadrant_labels(mx, my, inv_x, inv_y)
-board_names = labels if label_mode not in ("Crest", "None") else short_names
+board_names = labels
 boards = [leaders(vals, board_names, m) for m, vals in ((mx, x), (my, y))] if show_leaders else []
 
 # ───────────────────────────────────────────────────────────────────── figure
@@ -192,7 +268,7 @@ fig = go.Figure()
 ellipses = []
 if show_ellipses:
     for i in range(len(frame)):
-        if not ellipse_all and not is_hl[i]:
+        if not want_ellipse[i]:
             continue
         rx, ry = k * ex["sd"].iloc[i], k * ey["sd"].iloc[i]
         if not (np.isfinite(rx) and np.isfinite(ry)) or (rx == 0 and ry == 0):
@@ -210,14 +286,13 @@ if show_shift and estimate == "Bayes-adjusted":
                            xref="x", yref="y", axref="x", ayref="y", text="", showarrow=True,
                            arrowhead=2, arrowsize=0.8, arrowwidth=1, arrowcolor="#888")
 
-use_crests = label_mode == "Crest" and crest_urls.notna().any()
-show_text = label_mode not in ("None", "Crest") and (level == "Teams" or len(frame) <= 25)
+show_text = label_mode != "None" and not use_images and (level == "Teams" or len(frame) <= 25)
 text = [lab if (show_text or h) else "" for lab, h in zip(labels, is_hl)]
 fig.add_trace(go.Scatter(
     x=x, y=y, mode="markers+text", text=text, textposition="top center",
     textfont=dict(size=11),
     marker=dict(size=[16 if h else 11 for h in is_hl], color=colors,
-                opacity=0 if use_crests else 1,
+                opacity=0 if use_images else 1,
                 line=dict(width=[2.5 if h else 1 for h in is_hl], color="#FFFFFF")),
     customdata=np.stack([ex["observed"], ex["adjusted"], ex["sd"],
                          ey["observed"], ey["adjusted"], ey["sd"]], axis=1),
@@ -227,14 +302,15 @@ fig.add_trace(go.Scatter(
                    f"{my.label}: %{{customdata[3]:.1f}} (adj. %{{customdata[4]:.1f}} ± %{{customdata[5]:.1f}})"
                    "<extra></extra>")))
 
-if use_crests:
+if use_images:
     xr = float(np.nanmax(x) - np.nanmin(x)) or 1.0
     yr = float(np.nanmax(y) - np.nanmin(y)) or 1.0
-    for xi, yi, url, h in zip(x, y, crest_urls, is_hl):
+    size = 0.07 if level == "Teams" or len(frame) <= 30 else 0.045
+    for xi, yi, url, h in zip(x, y, image_urls, is_hl):
         if isinstance(url, str) and url:
             s = 1.35 if h else 1.0
             fig.add_layout_image(source=url, x=xi, y=yi, xref="x", yref="y",
-                                 sizex=0.07 * xr * s, sizey=0.07 * yr * s,
+                                 sizex=size * xr * s, sizey=size * yr * s,
                                  xanchor="center", yanchor="middle", layer="above")
 
 if show_medians:
@@ -242,12 +318,17 @@ if show_medians:
     fig.add_hline(y=float(np.nanmedian(y)), line_dash="dot", line_color="#888")
 
 if show_quadrants:
+    # One small uppercase "badge" per line: ▲ GOOD OFFENSIVE RATING / ▼ BAD DEFENSIVE RATING
     for key, lines in quads.items():
         vert, horiz = key.split("_")
-        fig.add_annotation(xref="paper", yref="paper", showarrow=False, align="left" if horiz == "left" else "right",
-                           x=0.005 if horiz == "left" else 0.995, y=0.995 if vert == "top" else 0.005,
-                           xanchor=horiz, yanchor=vert, text=quadrant_html(lines),
-                           font=dict(size=SMALL), bgcolor="rgba(128,128,128,0.08)")
+        ordered = lines if vert == "top" else list(reversed(lines))
+        for j, (arrow, color, text) in enumerate(ordered):
+            fig.add_annotation(xref="paper", yref="paper", showarrow=False,
+                               x=0.006 if horiz == "left" else 0.994, y=0.994 if vert == "top" else 0.006,
+                               xanchor=horiz, yanchor=vert, yshift=(-1 if vert == "top" else 1) * 24 * j,
+                               text=f"<b>{arrow} {text.upper()}</b>",
+                               font=dict(size=SMALL + 1, color=color, family=BADGE_FONT),
+                               bgcolor=badge_fill(color), bordercolor=color, borderwidth=1, borderpad=3)
 
 bottom_margin = 40
 if boards:
@@ -260,7 +341,7 @@ if boards:
 fig.update_xaxes(title=mx.label, autorange="reversed" if inv_x else True)
 fig.update_yaxes(title=my.label, autorange="reversed" if inv_y else True)
 fig.update_layout(height=720, margin=dict(l=10, r=10, t=40, b=bottom_margin),
-                  title=f"{my.label} vs {mx.label}")
+                  title=(f"{round_text.upper()} · " if round_text else "") + f"{my.label} vs {mx.label}")
 st.plotly_chart(fig)
 
 # ──────────────────────────────────────────────────────────────────────── table
@@ -290,8 +371,12 @@ Small samples produce extreme values by chance. The app estimates each metric wi
 **empirical-Bayes** model whose prior is the league itself:
 
 * **Rates built from counts** (3P%, eFG%, TOV%, USG%…): Beta-Binomial model.
-* **Continuous metrics** (ratings, per-game stats): Normal-Normal model with an approximate
-  standard error (ratings use an SD of 1.1 points per possession).
+* **Continuous metrics** (ratings, per-game stats, Game Score, AST/TOV): Normal-Normal model with
+  an approximate standard error (ratings use an SD of 1.1 points per possession).
+
+**Reading the chart.** The dot is the observed value; the ellipse is centred on the adjusted
+value. The gap between them is how much the model distrusts a small sample. Switch "Points show"
+to *Bayes-adjusted* and tick the arrow to see that shift.
 
 **Ellipses** show where the true value plausibly lies ({ci_level} credible region), assuming
 independent errors on both axes. **Overlapping ellipses = the data cannot separate them yet.**
@@ -313,7 +398,8 @@ if SOCIAL_EXPORT:
             "x": np.asarray(x, float), "y": np.asarray(y, float),
             "labels": list(labels if label_mode != "None" else short_names),
             "show_labels": label_mode != "None", "highlight": list(is_hl),
-            "colors": colors, "crest_urls": list(crest_urls) if label_mode == "Crest" else None,
+            "colors": colors, "image_urls": list(image_urls) if use_images else None, "image_kind": image_kind,
+            "round": round_text,
             "ellipses": ellipses, "medians": (float(np.nanmedian(x)), float(np.nanmedian(y))) if show_medians else None,
             "quadrants": quads if show_quadrants else None, "leaders": boards,
             "estimate": estimate, "ci_level": ci_level if show_ellipses else None,

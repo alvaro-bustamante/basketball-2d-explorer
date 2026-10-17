@@ -1,7 +1,7 @@
-"""Datos de ejemplo FICTICIOS para probar la app sin conexión.
+"""FICTIONAL demo data to try the app offline.
 
-Equipos y jugadores inventados ("Equipo A", "Jugador A1"...). No usar para
-publicar: solo sirven para ver cómo funciona la app.
+Invented teams and players ("Team A", "Player A1"...). Do not publish:
+they only show how the app works.
 """
 from __future__ import annotations
 
@@ -51,16 +51,16 @@ def demo_data(n_teams: int = 18, seed: int = 7):
         rows = []
         for j, (mn, prof) in enumerate(zip(mins, rng.permutation(profiles))):
             line = _player_line(rng, mn, prof)
-            line.update(player_code=f"P{L}{j + 1}", player_name=f"JUGADOR {L}{j + 1}, X",
-                        team_code=f"E{L}", team_name=f"Equipo {L}", crest_url=None)
+            line.update(player_code=f"P{L}{j + 1}", player_name=f"PLAYER {L}{j + 1}",
+                        team_code=f"E{L}", team_name=f"Team {L}", crest_url=None)
             rows.append(line)
         players += rows
         tot = pd.DataFrame(rows)[STAT_COLS].sum()
         tot["games"] = 30
-        teams.append(dict(team_code=f"E{L}", team_name=f"Equipo {L}", crest_url=None, **tot.to_dict()))
+        teams.append(dict(team_code=f"E{L}", team_name=f"Team {L}", crest_url=None, **tot.to_dict()))
 
     teams_df = pd.DataFrame(teams)
-    # Rivales: líneas medias de otros equipos con algo de ruido.
+    # Opponents: other teams' lines with some noise.
     opp = teams_df.copy()
     for c in STAT_COLS:
         if c in ("games", "min"):

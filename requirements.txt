@@ -6,3 +6,5 @@ requests>=2.31
 pillow>=10.0
 nba_api>=1.4
 matplotlib>=3.8
+lxml>=5.0
+openpyxl>=3.1

@@ -33,7 +33,7 @@ def quadrant_labels(mx, my, inv_x: bool, inv_y: bool) -> dict:
     return out
 
 
-def quadrant_html(lines) -> str:
+def quadrant_html(lines) -> str:  # kept for backwards compatibility
     return "<br>".join(f"<span style='color:{c}'>{a}</span> {t}" for a, c, t in lines)
 
 
@@ -65,3 +65,24 @@ def leaders_html(board: dict) -> str:
     c_top, c_bot = (NEUTRAL, NEUTRAL) if neutral else (GOOD, BAD)
     return (f"<b>{board['label']}</b>  <span style='color:{c_top}'>{board['top_tag']}</span>: {top}"
             f"<br><b>{board['label']}</b>  <span style='color:{c_bot}'>{board['bottom_tag']}</span>: {bot}")
+
+
+# Condensed "scoreboard" font for badges; browsers fall back down the list.
+BADGE_FONT = "Barlow Condensed, Bahnschrift SemiCondensed, Bahnschrift, Oswald, Arial Narrow, sans-serif"
+
+
+def badge_fill(hex_color: str, alpha: float = 0.13) -> str:
+    h = hex_color.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def round_label(games_played: int, league: str = "", playoffs: bool = False) -> str:
+    """'ROUND 7' from the games played so far (the leader in games played sets the round)."""
+    if not games_played or games_played < 1:
+        return ""
+    if playoffs:
+        return "PLAYOFFS"
+    if league.upper() == "NBA":
+        return f"GAME {games_played}"
+    return f"ROUND {games_played}"

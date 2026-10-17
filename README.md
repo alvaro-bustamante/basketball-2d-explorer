@@ -3,7 +3,7 @@
 Compare **any two basketball metrics** for teams or players, and see **how much of
 each difference is real** thanks to Bayesian uncertainty ellipses.
 
-Built with Streamlit · Data: official EuroLeague/EuroCup API, or your own CSV (ACB, NBA, any league).
+Built with Streamlit · Data: official EuroLeague/EuroCup API, NBA (stats.nba.com), or your own files (ACB, Primera FEB, any league).
 
 ## Why
 
@@ -15,13 +15,39 @@ so you can tell signal from noise before making a decision.
 ## Features
 
 - Teams or players, any metric on either axis: ratings, pace, Four Factors, shooting splits,
-  usage, assist rate, per-game and per-40 production.
+  TS%, steal and block rates, AST/TOV, usage, assist and rebound rates, Game Score, per-game
+  and per-40 production.
+- Names, codes, team crests or player photos as labels.
+- Self-explanatory quadrant badges (▲ GOOD / ▼ BAD) and top-3 / bottom-3 boards for each axis.
+- Automatic round label ("ROUND 12") from the games played.
 - **Observed vs Bayes-adjusted** values, with an optional arrow showing the shrinkage.
-- **Credible ellipses** (50 / 68 / 95%): overlapping ellipses mean the data cannot yet
-  separate those two entities.
+- **Credible ellipses** (50 / 68 / 95%) for every team or player, or only the ones you choose:
+  overlapping ellipses mean the data cannot yet separate those two entities.
 - League medians, reversible axes ("better" always up/right), highlights, filters.
 - Table with 95% credible intervals and CSV export.
-- Sources: EuroLeague and EuroCup official API, your own CSV templates, or demo data.
+- Sources: EuroLeague and EuroCup official API, NBA via `nba_api`, your own files, or demo data.
+
+## Leagues without an API (ACB, Primera FEB…)
+
+`explorer/spanish.py` reads stats tables you save yourself or that a club provides:
+an HTML page saved from the browser, Excel or CSV, with Spanish headers (PJ, MIN, PTS, T2, T3,
+TL, RO, RD, AS, BR, BP, TAP, FC, VAL) or English ones. Two layouts:
+
+1. **Season tables**: each team's own stats plus its opponents' stats ("rivales").
+2. **Team game log**: one row per team and game with a game id; opponent stats are derived
+   automatically.
+
+Load them directly in the app ("Your files"), or convert them once:
+
+```bash
+python pipelines/import_spanish_stats.py --league acb --teams equipos.html --opponents rivales.html
+python pipelines/import_spanish_stats.py --league primera-feb --gamelog partidos.xlsx
+```
+
+Optional columns `crest_url` and `photo_url` add crests and player photos. CSV files placed in
+`data/` as `<name>_teams.csv` / `<name>_players.csv` appear in the app under
+"Your files" > "Saved in data/ folder".
+
 
 ## Method
 
@@ -61,19 +87,24 @@ explorer/api.py        EuroLeague/EuroCup API client and column normalization
 explorer/sources.py    API, CSV templates and demo data
 explorer/metrics.py    metric registry: formulas and uncertainty inputs
 explorer/bayes.py      empirical-Bayes shrinkage and ellipses
-explorer/teams.py      team colors
+explorer/teams.py      team names and colors (EuroLeague, NBA, ACB by name)
+explorer/annotate.py   quadrant badges, leaderboards, round label
+explorer/spanish.py    importer for ACB / FEB tables and game logs
+explorer/nba.py        NBA data through nba_api
+pipelines/             command-line exports and imports
 explorer/demo.py       fictional demo data
 ```
 
 ## Data notes
 
 EuroLeague data comes from the league's public API and is used for non-commercial analysis.
-No private or club data is included in this repository.
+NBA data comes from stats.nba.com through `nba_api` (works locally; often blocked from cloud
+servers). No private or club data is included in this repository: keep your files in `data/`,
+which is git-ignored.
 
 ## Author
 
-**Álvaro Bustamante-Sánchez, PhD** · Associate Professor and Head of the Applied Technology
-& Research Lab, Universidad Europea de Madrid ·
+**Álvaro Bustamante-Sánchez, PhD** · Head of the Applied Technology & Research Lab ·
 [LinkedIn](https://www.linkedin.com/in/alvaro-bustamante-163b5655) ·
 [Google Scholar](https://scholar.google.com/citations?user=e_gK-2YAAAAJ)
 

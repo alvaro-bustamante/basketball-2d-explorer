@@ -63,7 +63,7 @@ def team_totals(teams: pd.DataFrame, opp: pd.DataFrame, game_length: int = 40) -
     return T
 
 
-def player_totals(players: pd.DataFrame, teams: pd.DataFrame) -> pd.DataFrame:
+def player_totals(players: pd.DataFrame, teams: pd.DataFrame, opp: pd.DataFrame | None = None) -> pd.DataFrame:
     p = players.copy()
     tm = teams.set_index("team_code")
     g = p["games"].astype(float)
@@ -71,6 +71,11 @@ def player_totals(players: pd.DataFrame, teams: pd.DataFrame) -> pd.DataFrame:
     P["name"] = p["player_name"]
     P["team_code"] = p["team_code"]
     P["team_name"] = p["team_name"]
+    P["photo_url"] = p["photo_url"] if "photo_url" in p.columns else None
+    crest = p["crest_url"] if "crest_url" in p.columns else pd.Series(None, index=p.index)
+    if "crest_url" in tm.columns:   # fall back to the team's crest
+        crest = crest.where(crest.notna(), p["team_code"].map(tm["crest_url"]))
+    P["crest_url"] = crest
     P["games"] = g
     P["min_pg"] = p["min"]
     P["min"] = p["min"] * g
@@ -78,6 +83,7 @@ def player_totals(players: pd.DataFrame, teams: pd.DataFrame) -> pd.DataFrame:
         P[c] = p[c] * g
     P["fga"] = P["fg2a"] + P["fg3a"]
     P["fgm"] = P["fg2m"] + P["fg3m"]
+    P["stocks"] = P["stl"] + P["blk"]
     # Team context while the player is on court (per-game team values).
     tm_game_min = _game_minutes_per_game(tm["min"])
     share = p["min"] / p["team_code"].map(tm_game_min)
@@ -85,6 +91,14 @@ def player_totals(players: pd.DataFrame, teams: pd.DataFrame) -> pd.DataFrame:
     tm_fgm = p["team_code"].map(tm["fg2m"] + tm["fg3m"])
     P["usage_opps"] = share * tm_usage * g
     P["teammate_fgm"] = (share * tm_fgm - (p["fg2m"] + p["fg3m"])) * g
+    # Rebound chances while on court (needs opponent stats).
+    if opp is not None and not opp.empty:
+        op = opp.set_index("team_code")
+        P["orb_chances"] = share * p["team_code"].map(tm["orb"] + op["drb"]) * g
+        P["drb_chances"] = share * p["team_code"].map(tm["drb"] + op["orb"]) * g
+    else:
+        P["orb_chances"] = np.nan
+        P["drb_chances"] = np.nan
     return P
 
 
@@ -111,6 +125,30 @@ def _per40(total_col, disp):
         se = 40 * np.sqrt(disp * P[total_col].clip(lower=0.5)) / P["min"]
         return ("normal", val, se)
     return f
+
+
+def _ratio(num_col, den_col):
+    """Ratio of two counts (e.g. AST/TOV) with a delta-method standard error."""
+    def f(P):
+        a, b = P[num_col].clip(lower=0.5), P[den_col].clip(lower=0.5)
+        r = a / b
+        return ("normal", P[num_col] / P[den_col].replace(0, np.nan), r * np.sqrt(1 / a + 1 / b))
+    return f
+
+
+def _game_score(P, prefix=""):
+    """Hollinger's Game Score: one-number box-score production."""
+    c = lambda k: P[prefix + k]  # noqa: E731
+    return (c("pts") + 0.4 * c("fgm") - 0.7 * c("fga") - 0.4 * (c("fta") - c("ftm"))
+            + 0.7 * c("orb") + 0.3 * c("drb") + c("stl") + 0.7 * c("ast") + 0.7 * c("blk")
+            - 0.4 * c("pf") - c("tov"))
+
+
+def _gmsc40(P):
+    gs = _game_score(P)
+    val = 40 * gs / P["min"]
+    se = 40 * np.sqrt(DISPERSION["pir"] * gs.abs().clip(lower=1)) / P["min"]
+    return ("normal", val, se)
 
 
 # ------------------------------------------------------------------ registry
@@ -144,6 +182,16 @@ TEAM_METRICS = [
            "Opponent effective FG%."),
     Metric("o_tov", "Opp TOV%", "high", lambda T: _prop(T.o_tov, T.o_poss), "Turnovers forced per possession."),
     Metric("o_p3", "Opp 3P%", "low", lambda T: _prop(T.o_fg3m, T.o_fg3a), "Opponent three-point %."),
+    Metric("ts", "TS%", "high", lambda T: _prop(T.t_pts / 2, T.t_fga + 0.44 * T.t_fta),
+           "True shooting %: points per shooting possession (twos, threes and free throws)."),
+    Metric("o_ftr", "Opp FT rate", "low", lambda T: _prop(T.o_ftm, T.o_fga),
+           "Free throws conceded per opponent FGA: defending without fouling."),
+    Metric("stlp", "STL%", "high", lambda T: _prop(T.t_stl, T.o_poss),
+           "Steals per opponent possession."),
+    Metric("blkp", "BLK%", "high", lambda T: _prop(T.t_blk, T.o_fg2a),
+           "Blocks per opponent two-point attempt (approximate rim protection)."),
+    Metric("ast_tov", "AST/TOV", "high", _ratio("t_ast", "t_tov"),
+           "Assists per turnover: ball security in creation."),
     Metric("pts", "Points per game", "high",
            lambda T: ("normal", T.t_pts / T.games, SD_TEAM_POINTS_PER_GAME / np.sqrt(T.games))),
     Metric("o_pts", "Opp points per game", "low",
@@ -176,6 +224,16 @@ PLAYER_METRICS = [
            "Share of teammates' made FG assisted while on court."),
     Metric("tovp", "TOV%", "low", lambda P: _prop(P.tov, P.fga + 0.44 * P.fta + P.tov),
            "Turnovers per possession used."),
+    Metric("orbp", "ORB%", "high", lambda P: _prop(P.orb, P.orb_chances),
+           "Share of available offensive rebounds grabbed while on court."),
+    Metric("drbp", "DRB%", "high", lambda P: _prop(P.drb, P.drb_chances),
+           "Share of available defensive rebounds grabbed while on court."),
+    Metric("ast_tov", "AST/TOV", "high", _ratio("ast", "tov"), "Assists per turnover."),
+    Metric("gmsc40", "Game Score per 40", "high", _gmsc40,
+           "Hollinger's Game Score per 40 minutes: all-round box-score production (works without PIR)."),
+    Metric("pir40", "PIR per 40", "high", _per40("pir", DISPERSION["pir"]), "PIR per 40 minutes."),
+    Metric("stocks40", "Stocks per 40", "high", _per40("stocks", DISPERSION["stl"]),
+           "Steals + blocks per 40 minutes: defensive activity."),
 ]
 
 

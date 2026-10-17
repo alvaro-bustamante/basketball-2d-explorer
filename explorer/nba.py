@@ -12,6 +12,7 @@ import time
 import pandas as pd
 
 LOGO_URL = "https://cdn.nba.com/logos/nba/{team_id}/global/L/logo.svg"
+HEADSHOT_URL = "https://cdn.nba.com/headshots/nba/latest/1040x760/{player_id}.png"
 
 
 class NBADataError(RuntimeError):
@@ -83,5 +84,7 @@ def load_season(season: int, season_type: str = "Regular Season", pause: float =
         "team_code": plyr["TEAM_ABBREVIATION"],
         "team_name": plyr["TEAM_ABBREVIATION"].map(
             {t["abbreviation"]: t["full_name"] for t in info.values()}),
-        "crest_url": None, "games": plyr["GP"], "min": plyr["MIN"]}), _with_fg2(plyr)], axis=1)
+        "crest_url": plyr["TEAM_ID"].map(lambda i: LOGO_URL.format(team_id=i)),
+        "photo_url": plyr["PLAYER_ID"].map(lambda i: HEADSHOT_URL.format(player_id=i)),
+        "games": plyr["GP"], "min": plyr["MIN"]}), _with_fg2(plyr)], axis=1)
     return teams, opp, players

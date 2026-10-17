@@ -51,12 +51,43 @@ TEAMS = {
         "SAS": ("#C4CED4", "#000000", "Spurs"), "TOR": ("#CE1141", "#000000", "Raptors"),
         "UTA": ("#002B5C", "#F9A01B", "Jazz"), "WAS": ("#002B5C", "#E31837", "Wizards"),
     },
-    # Add ACB codes here once you fix the codes used in your CSV files, e.g.
-    # "ACB": {"RMB": ("#FFFFFF", "#FEBE10", "Real Madrid"), ...}
+    # ACB and Primera FEB codes differ between sources, so these leagues are
+    # matched by team NAME (see NAME_KEYWORDS below). Add fixed codes here if
+    # you prefer, e.g. "ACB": {"RMB": ("#FFFFFF", "#FEBE10", "Real Madrid")}.
     "ACB": {},
+    "PRIMERA FEB": {},
 }
 # EuroCup and custom data reuse the EuroLeague table where codes overlap.
 ALIASES = {"EUROCUP": "EUROLEAGUE", "CUSTOM": "EUROLEAGUE", "DEMO": "EUROLEAGUE"}
+
+# Matched against the (sponsor-dependent) team name, so a new sponsor does not
+# break colors. Colors are approximate club colors: edit them freely.
+NAME_KEYWORDS = [
+    ("real madrid", ("#FFFFFF", "#FEBE10", "Real Madrid")),
+    ("barca", ("#A50044", "#004D98", "Barça")),
+    ("barcelona", ("#A50044", "#004D98", "Barça")),
+    ("valencia", ("#F47920", "#000000", "Valencia Basket")),
+    ("baskonia", ("#C8102E", "#0B2A5B", "Baskonia")),
+    ("unicaja", ("#007A33", "#5B2D86", "Unicaja")),
+    ("gran canaria", ("#FFD100", "#0057A8", "Gran Canaria")),
+    ("tenerife", ("#00529F", "#FFD200", "La Laguna Tenerife")),
+    ("joventut", ("#00A651", "#000000", "Joventut")),
+    ("manresa", ("#E30613", "#000000", "Manresa")),
+    ("zaragoza", ("#E30613", "#FFFFFF", "Zaragoza")),
+    ("murcia", ("#C8102E", "#000000", "UCAM Murcia")),
+    ("bilbao", ("#000000", "#E30613", "Bilbao Basket")),
+    ("girona", ("#E30613", "#FFFFFF", "Girona")),
+    ("breogan", ("#5AB4E5", "#FFFFFF", "Breogán")),
+    ("granada", ("#E30613", "#FFFFFF", "Granada")),
+    ("andorra", ("#00205B", "#FFD100", "Andorra")),
+    ("lleida", ("#00A3E0", "#FFFFFF", "Lleida")),
+    ("coruna", ("#0057A8", "#FFFFFF", "Coruña")),
+]
+
+# Distinct colors for teams with no entry (any league), assigned by team code.
+FALLBACK_PALETTE = ["#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F", "#EDC948",
+                    "#B07AA1", "#FF9DA7", "#9C755F", "#2CA7A0", "#D37295", "#8CD17D",
+                    "#A0CBE8", "#FFBE7D", "#86BCB6", "#F1CE63", "#D4A6C8", "#B6992D"]
 
 
 def _table(league: str) -> dict:
@@ -64,8 +95,27 @@ def _table(league: str) -> dict:
     return TEAMS.get(league) or TEAMS.get(ALIASES.get(league, ""), {})
 
 
-def short_name(code: str, full_name: str, league: str = "EUROLEAGUE") -> str:
+def _plain(text: str) -> str:
+    import unicodedata
+    t = unicodedata.normalize("NFKD", str(text)).encode("ascii", "ignore").decode()
+    return t.lower()
+
+
+def _entry(code: str, name: str | None, league: str):
     entry = _table(league).get(str(code).upper())
+    if entry is None and name and league.upper() in ("ACB", "PRIMERA FEB", "CUSTOM"):
+        plain = _plain(name)
+        entry = next((e for k, e in NAME_KEYWORDS if k in plain), None)
+    return entry
+
+
+def _fallback(code: str) -> str:
+    import zlib
+    return FALLBACK_PALETTE[zlib.crc32(str(code).encode()) % len(FALLBACK_PALETTE)]
+
+
+def short_name(code: str, full_name: str, league: str = "EUROLEAGUE") -> str:
+    entry = _entry(code, full_name, league)
     return entry[2] if entry else str(full_name)
 
 
@@ -84,9 +134,10 @@ def contrast(a: str, b: str) -> float:
     return (la + 0.05) / (lb + 0.05)
 
 
-def accent_for(team_code: str, background: str = "#0F1115", league: str = "EUROLEAGUE") -> str:
+def accent_for(team_code: str, background: str = "#0F1115", league: str = "EUROLEAGUE",
+               name: str | None = None) -> str:
     """Team color that reads well on a dark background (stories)."""
-    primary, secondary, *_ = _table(league).get(str(team_code).upper(), DEFAULT)
+    primary, secondary, *_ = _entry(team_code, name, league) or DEFAULT
     for c in (primary, secondary):
         if contrast(c, background) >= 3 and _luminance(c) < 0.85:
             return c
@@ -96,10 +147,12 @@ def accent_for(team_code: str, background: str = "#0F1115", league: str = "EUROL
     return "#FFFFFF"
 
 
-def chart_color(team_code: str, league: str = "EUROLEAGUE") -> str:
+def chart_color(team_code: str, league: str = "EUROLEAGUE", name: str | None = None) -> str:
     """Color for charts on light or dark backgrounds (avoids pure white/black)."""
-    primary, secondary, *_ = _table(league).get(str(team_code).upper(), DEFAULT)
-    for c in (primary, secondary):
+    entry = _entry(team_code, name, league)
+    if entry is None:
+        return _fallback(team_code)
+    for c in entry[:2]:
         if 0.03 < _luminance(c) < 0.8:
             return c
     return "#6B7280"

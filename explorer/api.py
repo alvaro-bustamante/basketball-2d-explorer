@@ -1,9 +1,9 @@
-"""Acceso a la API pública oficial de la EuroLeague (api-live.euroleague.net).
+"""Client for the official public EuroLeague API (api-live.euroleague.net).
 
-La misma API sirve EuroLeague (código "E") y EuroCup (código "U").
-Las respuestas se normalizan a un formato estándar de columnas en inglés
-abreviado (pts, fg2a, orb...) para que el resto de la app no dependa de los
-nombres exactos que use la API, que cambian a veces entre versiones.
+The same API serves the EuroLeague (code "E") and the EuroCup (code "U").
+Responses are normalized to a standard set of short English columns
+(pts, fg2a, orb...) so the rest of the app does not depend on the exact field
+names of the API, which sometimes change between versions.
 """
 from __future__ import annotations
 
@@ -14,11 +14,11 @@ import requests
 
 BASE_URL = "https://api-live.euroleague.net"
 COMPETITIONS = {"EuroLeague": "E", "EuroCup": "U"}
-PHASES = {"Temporada regular": "RS", "Toda la temporada": None, "Playoffs": "PO"}
+PHASES = {"Regular season": "RS", "Whole season": None, "Playoffs": "PO"}
 
-HEADERS = {"User-Agent": "el-quinteto-dashboard/1.0 (uso personal y docente)"}
+HEADERS = {"User-Agent": "basketball-2d-explorer/1.0 (non-commercial research and teaching)"}
 
-# Nombre estándar -> posibles nombres en la API (se prueba en orden).
+# Standard name -> possible API field names (tried in order).
 STAT_FIELDS = {
     "games": ["gamesPlayed", "games"],
     "min": ["minutesPlayed", "minutes"],
@@ -63,16 +63,16 @@ def _get_json(url: str, params: dict) -> dict | list:
         r.raise_for_status()
         return r.json()
     except (requests.RequestException, ValueError) as exc:
-        raise EuroLeagueAPIError(f"No se pudo leer {url}: {exc}") from exc
+        raise EuroLeagueAPIError(f"Could not read {url}: {exc}") from exc
 
 
 def fetch_stats(kind: str, endpoint: str, competition: str, season: int,
                 phase: str | None = "RS", mode: str = "PerGame") -> pd.DataFrame:
-    """Descarga estadísticas de temporada.
+    """Download season statistics.
 
-    kind: "players" o "teams".
-    endpoint: "traditional" (también "advanced"; para equipos, "opponentsTraditional").
-    season: año de inicio (2025 = temporada 2025-26).
+    kind: "players" or "teams".
+    endpoint: "traditional" (also "advanced"; for teams, "opponentsTraditional").
+    season: starting year (2025 = season 2025-26).
     """
     url = f"{BASE_URL}/v3/competitions/{competition}/statistics/{kind}/{endpoint}"
     params = {
@@ -90,7 +90,7 @@ def fetch_stats(kind: str, endpoint: str, competition: str, season: int,
     return pd.json_normalize(rows or [])
 
 
-# ---------------------------------------------------------------- normalización
+# ---------------------------------------------------------------- normalization
 def _find(df: pd.DataFrame, candidates: list[str]) -> str | None:
     for c in candidates:
         if c in df.columns:
@@ -103,7 +103,7 @@ def _find(df: pd.DataFrame, candidates: list[str]) -> str | None:
 
 
 def _to_number(s: pd.Series) -> pd.Series:
-    """Convierte números, porcentajes ('45.2%') y minutos ('25:30') a float."""
+    """Convert numbers, percentages ('45.2%') and minutes ('25:30') to float."""
     if s.dtype.kind in "if":
         return s.astype(float)
 
@@ -125,7 +125,7 @@ def _to_number(s: pd.Series) -> pd.Series:
 
 
 def normalize_stats(raw: pd.DataFrame, kind: str) -> pd.DataFrame:
-    """Pasa una respuesta de la API al formato estándar de la app."""
+    """Turn an API response into the app's standard format."""
     if raw.empty:
         return pd.DataFrame()
     out = pd.DataFrame(index=raw.index)
@@ -133,9 +133,13 @@ def normalize_stats(raw: pd.DataFrame, kind: str) -> pd.DataFrame:
         col = _find(raw, cands)
         out[std] = raw[col].astype(str) if col else ""
     crest = next((c for c in raw.columns if "crest" in c.lower()), None)
-    if crest is None and kind == "teams":
-        crest = next((c for c in raw.columns if "image" in c.lower()), None)
+    if crest is None:
+        crest = next((c for c in raw.columns if "image" in c.lower()
+                      and (kind == "teams" or "team" in c.lower())), None)
     out["crest_url"] = raw[crest] if crest else None
+    if kind == "players":
+        photo = next((c for c in raw.columns if "image" in c.lower() and "team" not in c.lower()), None)
+        out["photo_url"] = raw[photo] if photo else None
 
     missing = []
     for std, cands in STAT_FIELDS.items():
@@ -148,8 +152,8 @@ def normalize_stats(raw: pd.DataFrame, kind: str) -> pd.DataFrame:
     required = {"min", "pts", "fg2a", "fg3a", "fta", "orb", "tov"}
     if required & set(missing):
         raise EuroLeagueAPIError(
-            "La API ha cambiado el formato y faltan columnas clave: "
-            f"{sorted(required & set(missing))}. Columnas recibidas: {list(raw.columns)[:40]}"
+            "The API format has changed and key columns are missing: "
+            f"{sorted(required & set(missing))}. Columns received: {list(raw.columns)[:40]}"
         )
     if out["trb"].isna().all():
         out["trb"] = out["orb"] + out["drb"]
@@ -157,7 +161,7 @@ def normalize_stats(raw: pd.DataFrame, kind: str) -> pd.DataFrame:
 
 
 def load_season(competition: str, season: int, phase: str | None):
-    """Devuelve (equipos, rivales_de_cada_equipo, jugadores) ya normalizados."""
+    """Return normalized (teams, opponents_of_each_team, players)."""
     teams = normalize_stats(fetch_stats("teams", "traditional", competition, season, phase), "teams")
     opp = normalize_stats(fetch_stats("teams", "opponentsTraditional", competition, season, phase), "teams")
     players = normalize_stats(fetch_stats("players", "traditional", competition, season, phase), "players")
@@ -165,7 +169,7 @@ def load_season(competition: str, season: int, phase: str | None):
 
 
 def display_name(api_name: str) -> str:
-    """'LLULL, SERGIO' -> 'Llull'. Si no hay coma, devuelve el nombre en formato título."""
+    """'LLULL, SERGIO' -> 'Llull'. Without a comma, returns the name in title case."""
     name = str(api_name).strip()
     if "," in name:
         name = name.split(",")[0]
@@ -173,7 +177,7 @@ def display_name(api_name: str) -> str:
 
 
 def load_crest(url: str | None):
-    """Descarga un escudo como imagen PIL. Devuelve None si no se puede."""
+    """Download a crest or photo as a PIL image (PNG/JPG/WebP). None if not possible."""
     if not url or not isinstance(url, str) or not url.startswith("http"):
         return None
     try:

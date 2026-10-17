@@ -40,9 +40,18 @@ def player_template() -> bytes:
     return players[PLAYER_ID + STAT_COLUMNS].round(2).to_csv(index=False).encode()
 
 
+def _bytes(f) -> bytes:
+    """Uploaded file (Streamlit) or a path on disk."""
+    from pathlib import Path
+    return f.getvalue() if hasattr(f, "getvalue") else Path(f).read_bytes()
+
+
 def from_csv(team_file, player_file):
-    """Read the two CSV files produced from the templates (ACB, NBA, any league)."""
-    t = pd.read_csv(io.BytesIO(team_file.getvalue()))
+    """Read the two CSV files produced from the templates (ACB, Primera FEB, NBA, any league).
+
+    Optional columns: crest_url (teams and players) and photo_url (players).
+    """
+    t = pd.read_csv(io.BytesIO(_bytes(team_file)))
     missing = [c for c in TEAM_ID + STAT_COLUMNS + ["opp_" + c for c in STAT_COLUMNS[2:]] if c not in t.columns]
     if missing:
         raise ValueError(f"Team CSV is missing columns: {missing}")
@@ -50,14 +59,16 @@ def from_csv(team_file, player_file):
     opp = t[["team_code", "team_name", "games", "min"] + ["opp_" + c for c in STAT_COLUMNS[2:]]].copy()
     opp.columns = ["team_code", "team_name", "games", "min"] + STAT_COLUMNS[2:]
     for df in (teams, opp):
-        df["crest_url"] = None
+        df["crest_url"] = t["crest_url"] if "crest_url" in t.columns else None
     players = None
     if player_file is not None:
-        p = pd.read_csv(io.BytesIO(player_file.getvalue()))
+        p = pd.read_csv(io.BytesIO(_bytes(player_file)))
         missing = [c for c in PLAYER_ID + STAT_COLUMNS if c not in p.columns]
         if missing:
             raise ValueError(f"Player CSV is missing columns: {missing}")
         players = p[PLAYER_ID + STAT_COLUMNS].copy()
         players["player_code"] = players["player_name"]
-        players["crest_url"] = None
+        # Optional image columns: crest_url (team crest) and photo_url (player photo).
+        for c in ("crest_url", "photo_url"):
+            players[c] = p[c] if c in p.columns else None
     return teams, opp, players
