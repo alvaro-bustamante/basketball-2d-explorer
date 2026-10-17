@@ -41,7 +41,8 @@ def _game_minutes_per_game(min_pg: pd.Series) -> pd.Series:
 
 
 # --------------------------------------------------------------------- totals
-def team_totals(teams: pd.DataFrame, opp: pd.DataFrame) -> pd.DataFrame:
+def team_totals(teams: pd.DataFrame, opp: pd.DataFrame, game_length: int = 40) -> pd.DataFrame:
+    """Season totals per team. game_length: 40 (FIBA) or 48 (NBA), used for pace."""
     t = teams.set_index("team_code")
     o = opp.set_index("team_code").reindex(t.index)
     g = t["games"].astype(float)
@@ -58,6 +59,7 @@ def team_totals(teams: pd.DataFrame, opp: pd.DataFrame) -> pd.DataFrame:
         T[p + "poss"] = T[p + "fga"] + 0.44 * T[p + "fta"] - T[p + "orb"] + T[p + "tov"]
     T["poss"] = (T["t_poss"] + T["o_poss"]) / 2
     T["game_min"] = _game_minutes_per_game(t["min"]) * g
+    T["game_length"] = float(game_length)
     return T
 
 
@@ -123,8 +125,8 @@ TEAM_METRICS = [
            lambda T: ("normal", 100 * (T.t_pts - T.o_pts) / T.poss, np.sqrt(2) * _rate100_se(T.poss)),
            "Offensive minus defensive rating."),
     Metric("pace", "Pace", None,
-           lambda T: ("normal", 40 * T.poss / T.game_min, SD_PACE_PER_GAME / np.sqrt(T.games)),
-           "Possessions per 40 minutes."),
+           lambda T: ("normal", T.game_length * T.poss / T.game_min, SD_PACE_PER_GAME / np.sqrt(T.games)),
+           "Possessions per game (40 min FIBA, 48 min NBA)."),
     Metric("efg", "eFG%", "high", lambda T: _prop(T.t_fgm + 0.5 * T.t_fg3m, T.t_fga),
            "Effective field goal %: a three counts as 1.5 makes."),
     Metric("tov", "TOV%", "low", lambda T: _prop(T.t_tov, T.t_poss), "Turnovers per possession."),

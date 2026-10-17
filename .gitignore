@@ -10,3 +10,5 @@ data/
 # OS
 .DS_Store
 Thumbs.db
+# Personal tools (Instagram / LinkedIn export): kept local only
+personal/

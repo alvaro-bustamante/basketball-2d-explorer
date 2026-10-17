@@ -4,3 +4,5 @@ numpy>=1.24
 plotly>=5.20
 requests>=2.31
 pillow>=10.0
+nba_api>=1.4
+matplotlib>=3.8
