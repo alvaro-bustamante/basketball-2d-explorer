@@ -54,6 +54,16 @@ def load_nba(season: int, season_type: str):
     return nba.load_season(season, season_type)
 
 
+@st.cache_data(show_spinner="Preparing images (crests / face-cropped photos)…")
+def prepared_images(urls: tuple, kind: str) -> dict:
+    """URL -> image ready to draw (data URI): photos cropped to the face, crests whole.
+    Downloads are cached in data/cache/images/. Images that fail map to None."""
+    from concurrent.futures import ThreadPoolExecutor
+    from explorer.images import prepare
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return dict(zip(urls, pool.map(lambda u: prepare(u, kind), urls)))
+
+
 @st.cache_data
 def load_demo():
     return sources.from_demo()
@@ -245,6 +255,12 @@ labels = {"Short name": short_names, "Full name": full_names, "Code": codes}.get
 image_urls = {"Crest": crest_urls, "Team crest": crest_urls, "Photo": photo_urls}.get(label_mode)
 image_kind = "photo" if label_mode == "Photo" else "crest"
 use_images = image_urls is not None and image_urls.notna().any()
+if use_images:      # download once, crop photos to the face; failures fall back to the dot
+    ready = prepared_images(tuple(sorted({u for u in image_urls if isinstance(u, str) and u})), image_kind)
+    image_urls = image_urls.map(lambda u: ready.get(u) if isinstance(u, str) else None)
+    use_images = image_urls.notna().any()
+    if not use_images:
+        st.sidebar.caption("Images could not be downloaded: showing dots instead.")
 if image_urls is not None and not use_images:
     st.sidebar.caption("No images in this data source: showing names instead.")
 
@@ -313,7 +329,8 @@ fig.add_trace(go.Scatter(
     x=x, y=y, mode="markers+text", text=text, textposition="top center",
     textfont=dict(size=11),
     marker=dict(size=[16 if h else 11 for h in is_hl], color=colors,
-                opacity=0 if use_images else 1,
+                opacity=[0 if use_images and isinstance(u, str) else 1
+                         for u in (image_urls if use_images else [None] * len(frame))],
                 line=dict(width=[2.5 if h else 1 for h in is_hl], color="#FFFFFF")),
     customdata=np.stack([ex["observed"], ex["adjusted"], ex["sd"],
                          ey["observed"], ey["adjusted"], ey["sd"]], axis=1),

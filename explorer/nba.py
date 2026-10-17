@@ -12,6 +12,13 @@ import time
 import pandas as pd
 
 LOGO_URL = "https://cdn.nba.com/logos/nba/{team_id}/global/L/logo.svg"
+# PNG versions of the team logos (SVG cannot be drawn in the exported PNG images).
+PNG_LOGO_URL = "https://a.espncdn.com/i/teamlogos/nba/500/{abbr}.png"
+ESPN_ABBR = {"GSW": "gs", "NYK": "ny", "SAS": "sa", "NOP": "no", "UTA": "utah", "WAS": "wsh"}
+
+
+def logo_png(abbr: str) -> str:
+    return PNG_LOGO_URL.format(abbr=ESPN_ABBR.get(abbr, str(abbr).lower()))
 HEADSHOT_URL = "https://cdn.nba.com/headshots/nba/latest/1040x760/{player_id}.png"
 
 
@@ -72,7 +79,7 @@ def load_season(season: int, season_type: str = "Regular Season", pause: float =
     info = {t["id"]: t for t in static_teams.get_teams()}
     code = base["TEAM_ID"].map(lambda i: info.get(i, {}).get("abbreviation", str(i)))
     ident = pd.DataFrame({"team_code": code, "team_name": base["TEAM_NAME"],
-                          "crest_url": base["TEAM_ID"].map(lambda i: LOGO_URL.format(team_id=i)),
+                          "crest_url": code.map(logo_png),
                           "games": base["GP"], "min": base["MIN"]})
     teams = pd.concat([ident, _with_fg2(base)], axis=1)
 
@@ -84,7 +91,7 @@ def load_season(season: int, season_type: str = "Regular Season", pause: float =
         "team_code": plyr["TEAM_ABBREVIATION"],
         "team_name": plyr["TEAM_ABBREVIATION"].map(
             {t["abbreviation"]: t["full_name"] for t in info.values()}),
-        "crest_url": plyr["TEAM_ID"].map(lambda i: LOGO_URL.format(team_id=i)),
+        "crest_url": plyr["TEAM_ABBREVIATION"].map(logo_png),
         "photo_url": plyr["PLAYER_ID"].map(lambda i: HEADSHOT_URL.format(player_id=i)),
         "games": plyr["GP"], "min": plyr["MIN"]}), _with_fg2(plyr)], axis=1)
     return teams, opp, players
