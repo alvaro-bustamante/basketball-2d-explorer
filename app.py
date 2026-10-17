@@ -34,6 +34,9 @@ st.markdown('<link href="https://fonts.googleapis.com/css2?family=Barlow+Condens
 CURRENT_SEASON = 2026
 SHRINK = {"prop": eb_beta_binomial, "normal": eb_normal}
 SMALL = 10  # font size for all secondary text on the chart
+DATA_DIR = Path("data")
+# Leagues without a public API: read from data/<prefix>_<season>_teams.csv (and _players.csv).
+LOCAL_LEAGUES = {"Liga Endesa ACB": ("ACB", "acb"), "Primera FEB": ("PRIMERA FEB", "primerafeb")}
 
 
 def season_label(y: int) -> str:
@@ -60,8 +63,14 @@ def load_demo():
 with st.sidebar:
     st.title("🏀 2D Explorer")
     source = st.radio("Data source", ["EuroLeague API", "EuroCup API", "NBA (stats.nba.com)",
-                                      "Your files (ACB, Primera FEB, any league)", "Demo (fictional)"])
+                                      *LOCAL_LEAGUES, "Your files (any league)", "Demo (fictional)"])
     league, game_length = "EUROLEAGUE", 40
+    if source in LOCAL_LEAGUES:
+        league, prefix = LOCAL_LEAGUES[source]
+        local_seasons = sorted({int(f.name.split("_")[-2]) for f in DATA_DIR.glob(f"{prefix}_*_teams.csv")
+                                if f.name.split("_")[-2].isdigit()}, reverse=True) if DATA_DIR.exists() else []
+        if local_seasons:
+            season = st.selectbox("Season", local_seasons, format_func=season_label)
     if source in ("EuroLeague API", "EuroCup API", "NBA (stats.nba.com)"):
         season = st.selectbox("Season", list(range(CURRENT_SEASON, 2015, -1)), format_func=season_label)
     if source in ("EuroLeague API", "EuroCup API"):
@@ -72,7 +81,7 @@ with st.sidebar:
     if source.startswith("Your files"):
         league = st.selectbox("League (names and colors)", ["ACB", "PRIMERA FEB", "NBA", "EUROLEAGUE", "CUSTOM"])
         game_length = 48 if league == "NBA" else 40
-        data_dir = Path("data")
+        data_dir = DATA_DIR
         saved = sorted(f.name[:-len("_teams.csv")] for f in data_dir.glob("*_teams.csv")) if data_dir.exists() else []
         file_format = st.radio("File format", (["Saved in data/ folder"] if saved else [])
                                + ["App template (CSV)", "Season tables (Spanish or English)", "Team game log"],
@@ -119,6 +128,18 @@ try:
     elif source == "NBA (stats.nba.com)":
         teams, opp, players = load_nba(season, season_type)
         context = f"NBA {season_label(season)} · {season_type}"
+    elif source in LOCAL_LEAGUES:
+        if not local_seasons:
+            how = (f"`python personal/scrape_league.py {prefix if prefix == 'acb' else 'feb'} --season 2026`"
+                   if Path("personal/scrape_league.py").exists()
+                   else "`python pipelines/import_spanish_stats.py` (see the README)")
+            st.info(f"No {source} data yet. Create it with {how}; files are saved in data/ as "
+                    f"{prefix}_<season>_teams.csv and {prefix}_<season>_players.csv.")
+            st.stop()
+        players_path = DATA_DIR / f"{prefix}_{season}_players.csv"
+        teams, opp, players = sources.from_csv(DATA_DIR / f"{prefix}_{season}_teams.csv",
+                                               players_path if players_path.exists() else None)
+        context = f"{source} {season_label(season)}"
     elif source.startswith("Your files"):
         if team_file is None or (file_format.startswith("Season tables") and opp_file is None):
             st.info("Upload your files in the sidebar to start. Season tables need two files: "
