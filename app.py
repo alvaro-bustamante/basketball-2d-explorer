@@ -55,7 +55,7 @@ def load_nba(season: int, season_type: str):
 
 
 @st.cache_data(show_spinner="Preparing images (crests / face-cropped photos)…")
-def prepared_images(urls: tuple, kind: str) -> dict:
+def prepared_images(urls: tuple, kind: str, version: int = 0) -> dict:
     """URL -> image ready to draw (data URI): photos cropped to the face, crests whole.
     Downloads are cached in data/cache/images/. Images that fail map to None."""
     from concurrent.futures import ThreadPoolExecutor
@@ -256,7 +256,9 @@ image_urls = {"Crest": crest_urls, "Team crest": crest_urls, "Photo": photo_urls
 image_kind = "photo" if label_mode == "Photo" else "crest"
 use_images = image_urls is not None and image_urls.notna().any()
 if use_images:      # download once, crop photos to the face; failures fall back to the dot
-    ready = prepared_images(tuple(sorted({u for u in image_urls if isinstance(u, str) and u})), image_kind)
+    from explorer.images import CROP_VERSION
+    ready = prepared_images(tuple(sorted({u for u in image_urls if isinstance(u, str) and u})), image_kind,
+                            CROP_VERSION)
     image_urls = image_urls.map(lambda u: ready.get(u) if isinstance(u, str) else None)
     use_images = image_urls.notna().any()
     if not use_images:
