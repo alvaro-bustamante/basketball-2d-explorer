@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.ipynb_checkpoints/
+# Never commit private or club data
+data/
+*.xlsx
+*.parquet
+# OS
+.DS_Store
+Thumbs.db
