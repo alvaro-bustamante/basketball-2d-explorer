@@ -292,4 +292,5 @@ def to_template(teams: pd.DataFrame, opp: pd.DataFrame) -> pd.DataFrame:
     """One CSV in the app's team template format (with opp_ columns)."""
     o = opp.set_index("team_code")[STAT_COLUMNS[2:]].add_prefix("opp_")
     keep = ["team_code", "team_name"] + STAT_COLUMNS + (["crest_url"] if teams["crest_url"].notna().any() else [])
-    return teams[keep].set_index("team_code").join(o).reset_index()
+    from .sources import to_made_missed
+    return to_made_missed(teams[keep].set_index("team_code").join(o).reset_index())

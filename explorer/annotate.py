@@ -52,7 +52,7 @@ def leaders(values: pd.Series, names: pd.Series, metric, n: int = 3, fmt: str = 
         best, worst = s.nlargest(n), s.nsmallest(n)
         tags = ("Highest", "Lowest")
     as_list = lambda ser: [(name, fmt.format(v)) for name, v in ser.items()]  # noqa: E731
-    return {"label": metric.label, "top_tag": tags[0], "bottom_tag": tags[1],
+    return {"label": metric.label, "top_tag": tags[0], "bottom_tag": tags[1], "neutral": metric.better is None,
             "top": as_list(best), "bottom": as_list(worst)}
 
 
@@ -61,7 +61,7 @@ def leaders_html(board: dict) -> str:
         return ""
     top = " · ".join(f"{i}. {n} {v}" for i, (n, v) in enumerate(board["top"], 1))
     bot = " · ".join(f"{i}. {n} {v}" for i, (n, v) in enumerate(board["bottom"], 1))
-    neutral = board["top_tag"] == "Highest"
+    neutral = board.get("neutral", board["top_tag"] == "Highest")
     c_top, c_bot = (NEUTRAL, NEUTRAL) if neutral else (GOOD, BAD)
     return (f"<b>{board['label']}</b>  <span style='color:{c_top}'>{board['top_tag']}</span>: {top}"
             f"<br><b>{board['label']}</b>  <span style='color:{c_bot}'>{board['bottom_tag']}</span>: {bot}")

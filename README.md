@@ -2,6 +2,7 @@
 
 Compare **any two basketball metrics** for teams or players, and see **how much of
 each difference is real** thanks to Bayesian uncertainty ellipses.
+Interface in **English and Spanish** (selector at the top of the sidebar).
 
 Built with Streamlit · Data: official EuroLeague/EuroCup API, NBA (stats.nba.com), or your own files (ACB, Primera FEB, any league).
 
@@ -15,8 +16,13 @@ so you can tell signal from noise before making a decision.
 ## Features
 
 - Teams or players, any metric on either axis: ratings, pace, Four Factors, shooting splits,
-  TS%, steal and block rates, AST/TOV, usage, assist and rebound rates, Game Score, per-game
-  and per-40 production.
+  TS%, eFG%, PPS, FTA rate, ORB% / DRB% / TRB%, AST%, STL%, BLK%, TOV%, USG%, AST/TOV, Game Score,
+  per-game and per-40 production.
+- **Shape-of-play metrics**: ball movement (assisted share of made shots), HOB (hands on ball:
+  share of the team's made shots a player scored or assisted), **shot diet entropy** (how evenly
+  scoring chances are spread across 2-point, 3-point and free-throw trips, no shot coordinates
+  needed) and **scoring balance entropy** (how evenly shots are spread across the roster). Both
+  entropies are normalized to 0–1 and come with a Dirichlet posterior standard error.
 - Names, codes, team crests or player photos as labels.
 - Self-explanatory quadrant badges (▲ GOOD / ▼ BAD) and top-3 / bottom-3 boards for each axis.
 - Automatic round label ("ROUND 12") from the games played.
@@ -44,6 +50,11 @@ python pipelines/import_spanish_stats.py --league acb --teams equipos.html --opp
 python pipelines/import_spanish_stats.py --league primera-feb --gamelog partidos.xlsx
 ```
 
+**Shot format.** Templates store shots as **made and missed** (`fg2m`, `fg2x`, `fg3m`, `fg3x`,
+`ftm`, `ftx`): mutually exclusive events, as observational methodology requires. Attempts are
+derived only where a metric needs them (TS%, eFG%, FTA rate). Files with attempts (`fg2a`…)
+are still accepted.
+
 Optional columns `crest_url` and `photo_url` add crests and player photos. CSV files placed in
 `data/` as `<name>_teams.csv` / `<name>_players.csv` appear in the app under
 "Your files" > "Saved in data/ folder".
@@ -56,6 +67,7 @@ Empirical-Bayes models with a league-estimated prior:
 | Metric type | Model | Uncertainty input |
 |---|---|---|
 | Rates from counts (3P%, eFG%, TOV%, USG%, AST%…) | Beta-Binomial | makes / attempts (or events / opportunities) |
+| Shot diet / scoring balance entropy | Dirichlet-multinomial → Normal-Normal | posterior SD of the normalized entropy |
 | Ratings and per-game stats | Normal-Normal | approximate standard error (e.g. SD ≈ 1.1 points per possession) |
 
 The prior mean and the true between-entity spread are estimated by the method of moments

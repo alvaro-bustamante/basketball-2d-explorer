@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from explorer import nba  # noqa: E402
-from explorer.sources import PLAYER_ID, STAT_COLUMNS  # noqa: E402
+from explorer.sources import PLAYER_ID, STAT_COLUMNS, to_made_missed  # noqa: E402
 
 
 def main(season: int):
@@ -22,8 +22,8 @@ def main(season: int):
     label = f"{season}-{str(season + 1)[-2:]}"
     o = opp.set_index("team_code")[STAT_COLUMNS[2:]].add_prefix("opp_")
     t = teams.set_index("team_code")[["team_name"] + STAT_COLUMNS].join(o).reset_index()
-    t.to_csv(out / f"nba_{label}_teams.csv", index=False)
-    players[PLAYER_ID + STAT_COLUMNS].to_csv(out / f"nba_{label}_players.csv", index=False)
+    to_made_missed(t).to_csv(out / f"nba_{label}_teams.csv", index=False)
+    to_made_missed(players[PLAYER_ID + STAT_COLUMNS]).to_csv(out / f"nba_{label}_players.csv", index=False)
     print(f"Saved {len(t)} teams and {len(players)} players to {out.resolve()}")
 
 

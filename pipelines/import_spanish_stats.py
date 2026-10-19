@@ -26,7 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from explorer import spanish  # noqa: E402
-from explorer.sources import PLAYER_ID, STAT_COLUMNS  # noqa: E402
+from explorer.sources import PLAYER_ID, STAT_COLUMNS, to_made_missed  # noqa: E402
 
 
 def main():
@@ -53,7 +53,7 @@ def main():
     print(f"Saved {len(teams)} teams to {out / f'{args.league}_teams.csv'}")
     if players is not None:
         cols = [c for c in PLAYER_ID + STAT_COLUMNS + ["photo_url", "crest_url"] if c in players.columns]
-        players[cols].round(3).to_csv(out / f"{args.league}_players.csv", index=False)
+        to_made_missed(players[cols]).round(3).to_csv(out / f"{args.league}_players.csv", index=False)
         print(f"Saved {len(players)} players to {out / f'{args.league}_players.csv'}")
 
 

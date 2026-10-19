@@ -41,7 +41,8 @@ def _game_minutes_per_game(min_pg: pd.Series) -> pd.Series:
 
 
 # --------------------------------------------------------------------- totals
-def team_totals(teams: pd.DataFrame, opp: pd.DataFrame, game_length: int = 40) -> pd.DataFrame:
+def team_totals(teams: pd.DataFrame, opp: pd.DataFrame, game_length: int = 40,
+                players: pd.DataFrame | None = None) -> pd.DataFrame:
     """Season totals per team. game_length: 40 (FIBA) or 48 (NBA), used for pace."""
     t = teams.set_index("team_code")
     o = opp.set_index("team_code").reindex(t.index)
@@ -60,7 +61,49 @@ def team_totals(teams: pd.DataFrame, opp: pd.DataFrame, game_length: int = 40) -
     T["poss"] = (T["t_poss"] + T["o_poss"]) / 2
     T["game_min"] = _game_minutes_per_game(t["min"]) * g
     T["game_length"] = float(game_length)
+    # Scoring balance: entropy of the shooting-possession shares among the team's players.
+    T["balance_entropy"], T["balance_entropy_se"] = np.nan, np.nan
+    if players is not None and not players.empty and "team_code" in players:
+        use = (players["fg2a"] + players["fg3a"] + 0.44 * players["fta"]) * players["games"]
+        for code, idx in players.groupby("team_code").groups.items():
+            if code in T.index:
+                v = use.loc[idx].fillna(0).clip(lower=0).values
+                v = v[v > 0]
+                if len(v) >= 3:
+                    obs, sd = dirichlet_entropy(v[None, :])
+                    T.loc[code, "balance_entropy"], T.loc[code, "balance_entropy_se"] = obs[0], sd[0]
     return T
+
+
+def dirichlet_entropy(counts, draws: int = 400, seed: int = 7):
+    """Normalized Shannon entropy (0-1) of count vectors and its uncertainty.
+
+    counts: array (n_entities, k_categories). The uncertainty comes from a
+    Dirichlet(1 + counts) posterior on the category shares (Dirichlet-multinomial).
+    Returns (observed_entropy, posterior_sd).
+    """
+    c = np.asarray(counts, float)
+    k = c.shape[1]
+    if k < 2:
+        return np.full(len(c), np.nan), np.full(len(c), np.nan)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        p = c / c.sum(axis=1, keepdims=True)
+        obs = -(np.where(p > 0, p * np.log(p), 0)).sum(axis=1) / np.log(k)
+    rng = np.random.default_rng(seed)
+    g = rng.gamma(1 + c[:, None, :], size=(len(c), draws, k))
+    q = g / g.sum(axis=2, keepdims=True)
+    h = -(q * np.log(np.clip(q, 1e-12, None))).sum(axis=2) / np.log(k)
+    obs = np.where(c.sum(axis=1) > 0, obs, np.nan)
+    return obs, h.std(axis=1)
+
+
+def _diet_entropy(two, three, ft_trips):
+    """Shot diet entropy over 2-point attempts, 3-point attempts and free-throw trips."""
+    def f(F):
+        counts = np.column_stack([two(F), three(F), ft_trips(F)]).clip(min=0)
+        obs, sd = dirichlet_entropy(np.nan_to_num(counts))
+        return ("normal", pd.Series(obs, index=F.index), pd.Series(sd, index=F.index))
+    return f
 
 
 def player_totals(players: pd.DataFrame, teams: pd.DataFrame, opp: pd.DataFrame | None = None) -> pd.DataFrame:
@@ -96,9 +139,12 @@ def player_totals(players: pd.DataFrame, teams: pd.DataFrame, opp: pd.DataFrame 
         op = opp.set_index("team_code")
         P["orb_chances"] = share * p["team_code"].map(tm["orb"] + op["drb"]) * g
         P["drb_chances"] = share * p["team_code"].map(tm["drb"] + op["orb"]) * g
+        opp_poss = op["fg2a"] + op["fg3a"] + 0.44 * op["fta"] - op["orb"] + op["tov"]
+        P["opp_poss_on"] = share * p["team_code"].map(opp_poss) * g
+        P["opp_fg2a_on"] = share * p["team_code"].map(op["fg2a"]) * g
     else:
-        P["orb_chances"] = np.nan
-        P["drb_chances"] = np.nan
+        for c in ("orb_chances", "drb_chances", "opp_poss_on", "opp_fg2a_on"):
+            P[c] = np.nan
     return P
 
 
@@ -177,7 +223,22 @@ TEAM_METRICS = [
     Metric("p3", "3P%", "high", lambda T: _prop(T.t_fg3m, T.t_fg3a), "Three-point %."),
     Metric("p2", "2P%", "high", lambda T: _prop(T.t_fg2m, T.t_fg2a), "Two-point %."),
     Metric("ft", "FT%", "high", lambda T: _prop(T.t_ftm, T.t_fta), "Free throw %."),
-    Metric("astp", "AST%", None, lambda T: _prop(T.t_ast, T.t_fgm), "Share of made FG that are assisted."),
+    Metric("astp", "Ball movement (AST/FGM)", None, lambda T: _prop(T.t_ast, T.t_fgm),
+           "Share of made field goals that are assisted."),
+    Metric("trb", "TRB%", "high", lambda T: _prop(T.t_orb + T.t_drb, T.t_orb + T.o_drb + T.t_drb + T.o_orb),
+           "Share of all available rebounds."),
+    Metric("fta_rate", "FTA rate", "high", _ratio("t_fta", "t_fga"),
+           "Free throws attempted per field goal attempt: ability to draw fouls."),
+    Metric("pps", "PPS", "high",
+           lambda T: ("normal", T.t_pts / T.t_fga, 1.1 / np.sqrt(T.t_fga)),
+           "Points per field goal attempt."),
+    Metric("diet", "Shot diet entropy", None,
+           _diet_entropy(lambda T: T.t_fg2a, lambda T: T.t_fg3a, lambda T: 0.44 * T.t_fta),
+           "Diversity among twos, threes and free-throw trips (0 = one type only, 1 = even mix). "
+           "Uncertainty from a Dirichlet-multinomial model."),
+    Metric("balance", "Scoring balance entropy", None,
+           lambda T: ("normal", T.balance_entropy, T.balance_entropy_se),
+           "How evenly shots are shared among players (0 = one player takes everything, 1 = even)."),
     Metric("o_efg", "Opp eFG%", "low", lambda T: _prop(T.o_fgm + 0.5 * T.o_fg3m, T.o_fga),
            "Opponent effective FG%."),
     Metric("o_tov", "Opp TOV%", "high", lambda T: _prop(T.o_tov, T.o_poss), "Turnovers forced per possession."),
@@ -229,6 +290,21 @@ PLAYER_METRICS = [
     Metric("drbp", "DRB%", "high", lambda P: _prop(P.drb, P.drb_chances),
            "Share of available defensive rebounds grabbed while on court."),
     Metric("ast_tov", "AST/TOV", "high", _ratio("ast", "tov"), "Assists per turnover."),
+    Metric("hob", "HOB", "high", lambda P: _prop(P.fgm + P.ast, P.teammate_fgm + P.fgm),
+           "Hands on Buckets (on court): baskets the player scores or assists, out of the team's baskets "
+           "while he is on court."),
+    Metric("trbp", "TRB%", "high", lambda P: _prop(P.trb, P.orb_chances + P.drb_chances),
+           "Share of all available rebounds grabbed while on court."),
+    Metric("stlp", "STL%", "high", lambda P: _prop(P.stl, P.opp_poss_on), "Steals per opponent possession on court."),
+    Metric("blkp", "BLK%", "high", lambda P: _prop(P.blk, P.opp_fg2a_on),
+           "Blocks per opponent two-point attempt on court."),
+    Metric("fta_rate", "FTA rate", "high", _ratio("fta", "fga"),
+           "Free throws attempted per field goal attempt: ability to draw fouls."),
+    Metric("pps", "PPS", "high", lambda P: ("normal", (P.pts) / P.fga.replace(0, np.nan),
+                                            1.1 / np.sqrt(P.fga.clip(lower=1))), "Points per field goal attempt."),
+    Metric("diet", "Shot diet entropy", None,
+           _diet_entropy(lambda P: P.fg2a, lambda P: P.fg3a, lambda P: 0.44 * P.fta),
+           "Diversity among twos, threes and free-throw trips (0 = one type only, 1 = even mix)."),
     Metric("gmsc40", "Game Score per 40", "high", _gmsc40,
            "Hollinger's Game Score per 40 minutes: all-round box-score production (works without PIR)."),
     Metric("pir40", "PIR per 40", "high", _per40("pir", DISPERSION["pir"]), "PIR per 40 minutes."),
