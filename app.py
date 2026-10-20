@@ -36,7 +36,8 @@ SHRINK = {"prop": eb_beta_binomial, "normal": eb_normal}
 SMALL = 10  # font size for all secondary text on the chart
 DATA_DIR = Path("data")
 # Leagues without a public API: read from data/<prefix>_<season>_teams.csv (and _players.csv).
-LOCAL_LEAGUES = {"Liga Endesa ACB": ("ACB", "acb"), "Primera FEB": ("PRIMERA FEB", "primerafeb")}
+LOCAL_LEAGUES = {"Liga Endesa ACB": ("ACB", "acb"), "Primera FEB": ("PRIMERA FEB", "primerafeb"),
+                 "Segunda FEB": ("SEGUNDA FEB", "segundafeb")}
 
 
 def season_label(y: int) -> str:
@@ -74,7 +75,8 @@ with st.sidebar:
     set_lang(LANGS[st.selectbox("🌐 Language / Idioma", list(LANGS))])
     st.title("🏀 2D Explorer")
     SOURCES = {"src_el": "EuroLeague API", "src_ec": "EuroCup API", "src_nba": "NBA (stats.nba.com)",
-               "src_acb": "Liga Endesa ACB", "src_feb": "Primera FEB", "src_files": "Your files (any league)",
+               "src_acb": "Liga Endesa ACB", "src_feb": "Primera FEB", "src_feb2": "Segunda FEB",
+               "src_files": "Your files (any league)",
                "src_demo": "Demo (fictional)"}
     source = SOURCES[st.radio(t("data_source"), list(SOURCES), format_func=t)]
     league, game_length = "EUROLEAGUE", 40
@@ -92,7 +94,8 @@ with st.sidebar:
         league, game_length = "NBA", 48
         season_type = st.selectbox(t("season_type"), ["Regular Season", "Playoffs"])
     if source.startswith("Your files"):
-        league = st.selectbox(t("league_names"), ["ACB", "PRIMERA FEB", "NBA", "EUROLEAGUE", "CUSTOM"])
+        league = st.selectbox(t("league_names"), ["ACB", "PRIMERA FEB", "SEGUNDA FEB", "NBA", "EUROLEAGUE",
+                                                  "CUSTOM"])
         game_length = 48 if league == "NBA" else 40
         data_dir = DATA_DIR
         saved = sorted(f.name[:-len("_teams.csv")] for f in data_dir.glob("*_teams.csv")) if data_dir.exists() else []
@@ -144,7 +147,8 @@ try:
         context = f"NBA {season_label(season)} · {season_type}"
     elif source in LOCAL_LEAGUES:
         if not local_seasons:
-            how = (f"`python personal/scrape_league.py {prefix if prefix == 'acb' else 'feb'} --season 2026`"
+            how = (("`python personal/scrape_league.py acb --season 2026`" if prefix == "acb" else
+                    f"`python personal/scrape_league.py feb --season 2026 --competition {prefix}`")
                    if Path("personal/scrape_league.py").exists()
                    else "`python pipelines/import_spanish_stats.py` (see the README)")
             st.info(t("no_local", source=source, how=how))
@@ -165,7 +169,8 @@ try:
                 values="totals" if values_kind == "Season totals" else "averages")
         else:
             teams, opp, players = spanish.from_game_log(team_file, player_file)
-        context = {"ACB": "Liga Endesa ACB", "PRIMERA FEB": "Primera FEB"}.get(league, league.title())
+        context = {"ACB": "Liga Endesa ACB", "PRIMERA FEB": "Primera FEB",
+                   "SEGUNDA FEB": "Segunda FEB"}.get(league, league.title())
         if file_format == "Saved in data/ folder" and dataset.split("_")[-1].isdigit():
             context += f" {season_label(int(dataset.split('_')[-1]))}"
     else:
@@ -187,6 +192,7 @@ auto_round = ("" if not games_played else t("playoffs") if playoffs
               else f"{t('game_word') if league == 'NBA' else t('round_word')} {games_played}")
 
 # ───────────────────────────────────────────────────────── build the frame
+team_sel = []
 if level == "Teams":
     frame = team_totals(teams, opp, game_length=game_length, players=players)
     registry = TEAM_METRICS
@@ -223,7 +229,9 @@ else:
     short_names = frame["name"].map(api.display_name)
     codes = frame["team_code"]
     crest_urls = frame["crest_url"]
-    photo_urls = frame["photo_url"]
+    from explorer.images import face_override
+    photo_urls = pd.Series([face_override(n) or u for n, u in zip(full_names, frame["photo_url"])],
+                           index=frame.index)
     team_full = codes.map(lambda c: team_names.get(c, c))
     colors = [chart_color(c, league, n) for c, n in zip(codes, team_full)]
 
@@ -264,8 +272,10 @@ use_images = image_urls is not None and image_urls.notna().any()
 if use_images:      # download once, crop photos to the face; failures fall back to the dot
     from explorer.images import CROP_VERSION
     with st.spinner(t("img_prep")):
+        from explorer.images import FACES_DIR
+        faces_stamp = max((f.stat().st_mtime for f in FACES_DIR.glob("*")), default=0)   # your crops changed
         ready = prepared_images(tuple(sorted({u for u in image_urls if isinstance(u, str) and u})), image_kind,
-                                CROP_VERSION)
+                                (CROP_VERSION, faces_stamp))
     image_urls = image_urls.map(lambda u: ready.get(u) if isinstance(u, str) else None)
     use_images = image_urls.notna().any()
     if not use_images:
@@ -278,6 +288,21 @@ st.title("Basketball 2D Explorer")
 round_html = (f"<span style='font-family:{BADGE_FONT};font-weight:700;letter-spacing:.12em;"
               f"background:#FFB000;color:#111;padding:2px 10px;border-radius:12px;font-size:0.85rem'>"
               f"{round_text.upper()}</span> &nbsp;" if round_text else "")
+header_teams = []          # (short name, crest data URI or None) of the teams picked in the filter
+if team_sel:
+    from explorer.images import CROP_VERSION
+    crest_of = dict(zip(teams["team_code"], teams["crest_url"])) if "crest_url" in teams else {}
+    tnames = dict(zip(teams["team_code"], teams["team_name"]))
+    urls = tuple(u for u in (crest_of.get(c) for c in team_sel) if isinstance(u, str) and u)
+    ready_crests = prepared_images(urls, "crest", CROP_VERSION) if urls else {}
+    header_teams = [(short_name(c, tnames.get(c, c), league), ready_crests.get(crest_of.get(c))) for c in team_sel]
+teams_html = "".join(
+    (f"<img src='{uri}' style='height:34px;vertical-align:middle;margin-right:6px'>" if uri else "")
+    + f"<span style='font-family:{BADGE_FONT};font-weight:700;font-size:1.05rem;letter-spacing:.06em;"
+      f"margin-right:18px;vertical-align:middle'>{smart_upper(name)}</span>"
+    for name, uri in header_teams)
+if teams_html:
+    st.markdown(f"<div style='margin:4px 0 6px'>{teams_html}</div>", unsafe_allow_html=True)
 st.markdown(f"{round_html}<span style='opacity:.7'>{t('caption', context=context)}</span>", unsafe_allow_html=True)
 
 c1, c2 = st.columns(2)
@@ -407,8 +432,30 @@ if boards:
                            text=leaders_html(board), font=dict(size=SMALL))
     bottom_margin = 150
 
-fig.update_xaxes(title=X_LABEL, autorange="reversed" if inv_x else True)
-fig.update_yaxes(title=Y_LABEL, autorange="reversed" if inv_y else True)
+
+
+def padded_range(values, ells, axis, frac_low, frac_high, extra):
+    """Axis range covering points and ellipses, plus room for badges (frac of the
+    final axis length) and for half an image (extra, in data units)."""
+    vals = [v for v in np.asarray(values, float) if np.isfinite(v)]
+    for e in ells:
+        c, r = (e[0], e[2]) if axis == "x" else (e[1], e[3])
+        vals += [c - r, c + r]
+    lo, hi = min(vals), max(vals)
+    span = (hi - lo) or 1.0
+    total = (span + 2 * extra) / max(1 - frac_low - frac_high, 0.3)
+    return lo - extra - frac_low * total, hi + extra + frac_high * total
+
+
+plot_h = 720 - 40 - bottom_margin - 60                      # approximate plotting height in pixels
+band = (64 / plot_h) if show_quadrants else 0.02          # two rows of badges at the top and the bottom
+img_x = img_y = 0.0
+if use_images:
+    img_x, img_y = 0.5 * size * xr * 1.35, 0.5 * size * yr * 1.35
+x_range = padded_range(x, ellipses, "x", 0.02, 0.02, img_x)
+y_range = padded_range(y, ellipses, "y", band, band, img_y)
+fig.update_xaxes(title=X_LABEL, range=x_range[::-1] if inv_x else x_range, autorange=False)
+fig.update_yaxes(title=Y_LABEL, range=y_range[::-1] if inv_y else y_range, autorange=False)
 fig.update_layout(height=720, margin=dict(l=10, r=10, t=40, b=bottom_margin),
                   title=(f"{round_text.upper()} · " if round_text else "") + f"{Y_LABEL} vs {X_LABEL}")
 st.plotly_chart(fig)
@@ -446,7 +493,7 @@ if SOCIAL_EXPORT:
             "labels": list(labels if label_mode != "None" else short_names),
             "show_labels": label_mode != "None", "highlight": list(is_hl),
             "colors": colors, "image_urls": list(image_urls) if use_images else None, "image_kind": image_kind,
-            "round": round_text,
+            "round": round_text, "teams": header_teams,
             "ellipses": ellipses, "medians": (float(np.nanmedian(x)), float(np.nanmedian(y))) if show_medians else None,
             "quadrants": quads if show_quadrants else None, "leaders": boards,
             "estimate": estimate, "ci_level": ci_level if show_ellipses else None,

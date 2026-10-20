@@ -56,6 +56,7 @@ TEAMS = {
     # you prefer, e.g. "ACB": {"RMB": ("#FFFFFF", "#FEBE10", "Real Madrid")}.
     "ACB": {},
     "PRIMERA FEB": {},
+    "SEGUNDA FEB": {},
 }
 # EuroCup and custom data reuse the EuroLeague table where codes overlap.
 ALIASES = {"EUROCUP": "EUROLEAGUE", "CUSTOM": "EUROLEAGUE", "DEMO": "EUROLEAGUE"}
@@ -103,7 +104,7 @@ def _plain(text: str) -> str:
 
 def _entry(code: str, name: str | None, league: str):
     entry = _table(league).get(str(code).upper())
-    if entry is None and name and league.upper() in ("ACB", "PRIMERA FEB", "CUSTOM"):
+    if entry is None and name and league.upper() in ("ACB", "PRIMERA FEB", "SEGUNDA FEB", "CUSTOM"):
         plain = _plain(name)
         entry = next((e for k, e in NAME_KEYWORDS if k in plain), None)
     return entry

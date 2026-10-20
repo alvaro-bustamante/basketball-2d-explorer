@@ -55,6 +55,10 @@ python pipelines/import_spanish_stats.py --league primera-feb --gamelog partidos
 derived only where a metric needs them (TS%, eFG%, FTA rate). Files with attempts (`fg2a`…)
 are still accepted.
 
+**Photos.** Downloaded photos are kept in `data/cache/images/` (originals, never re-downloaded);
+the face crop is computed when the app starts. If a crop is not right, save your own square crop as
+`data/faces/<first-last>.png` (e.g. `data/faces/sergio-llull.png`): the app uses it as it is.
+
 Optional columns `crest_url` and `photo_url` add crests and player photos. CSV files placed in
 `data/` as `<name>_teams.csv` / `<name>_players.csv` appear in the app under
 "Your files" > "Saved in data/ folder".

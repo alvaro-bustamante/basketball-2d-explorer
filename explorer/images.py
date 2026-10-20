@@ -7,6 +7,7 @@ upper middle of the picture) is used.
 from __future__ import annotations
 
 import base64
+import math
 import hashlib
 from io import BytesIO
 from pathlib import Path
@@ -14,16 +15,40 @@ from pathlib import Path
 import requests
 
 CACHE_DIR = Path("data") / "cache" / "images"
+FACES_DIR = Path("data") / "faces"      # your own crops: data/faces/sergio-llull.png (used as they are)
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; basketball-2d-explorer/1.0)"}
 
 
+def slug(name: str) -> str:
+    """'Sergio Llull' -> 'sergio-llull' (file name for a manual crop in data/faces/)."""
+    import re
+    import unicodedata
+    plain = unicodedata.normalize("NFKD", str(name)).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "-", plain.lower()).strip("-")
+
+
+def face_override(name: str) -> str | None:
+    """'file:' address of a manual crop for this player, if you saved one in data/faces/."""
+    for ext in ("png", "jpg", "jpeg", "webp"):
+        path = FACES_DIR / f"{slug(name)}.{ext}"
+        if path.exists():
+            return "file:" + str(path)
+    return None
+
+
 def load_image(url: str | None):
-    """PIL image from a URL (PNG/JPG/WebP), cached in data/cache/images/. None if not possible."""
-    if not url or not isinstance(url, str) or not url.startswith("http"):
-        return None
+    """PIL image from a URL (PNG/JPG/WebP), cached in data/cache/images/, or from a
+    local 'file:' path. None if not possible."""
     try:
         from PIL import Image
     except ImportError:
+        return None
+    if isinstance(url, str) and url.startswith("file:"):
+        try:
+            return Image.open(url[5:]).convert("RGBA")
+        except Exception:
+            return None
+    if not url or not isinstance(url, str) or not url.startswith("http"):
         return None
     path = CACHE_DIR / (hashlib.md5(url.encode()).hexdigest() + ".bin")
     try:
@@ -66,6 +91,9 @@ def _silhouette_head(img):
 
 
 _yunet = None
+import threading  # noqa: E402
+
+_yunet_lock = threading.Lock()   # the detector is not thread-safe (images are prepared in parallel)
 
 
 def _detect_face(img):
@@ -80,6 +108,12 @@ def _detect_face(img):
     if not hasattr(cv2, "FaceDetectorYN"):
         return None
     try:
+        if hasattr(cv2, "utils") and hasattr(cv2.utils, "logging"):     # silence OpenCV's backend warnings
+            cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+    except Exception:
+        pass
+    try:
+      with _yunet_lock:
         if _yunet is None:
             model = CACHE_DIR.parent / "face_detection_yunet.onnx"
             if not model.exists():
@@ -97,7 +131,10 @@ def _detect_face(img):
         return None
     if faces is None or len(faces) == 0:
         return None
-    x, y, w, h = max(faces, key=lambda f: f[2] * f[3])[:4]
+    faces = [f for f in faces if np.all(np.isfinite(f[:4])) and f[2] > 0 and f[3] > 0]
+    if not faces:
+        return None
+    x, y, w, h = (float(v) for v in max(faces, key=lambda f: f[2] * f[3])[:4])
     return x + w / 2, y + h / 2, max(w, h)
 
 
@@ -123,10 +160,14 @@ def face_crop(img, zoom: float = 2.0):
         else:
             side = min(w, h)
             cx, cy = w / 2, side / 2
+    if not all(math.isfinite(v) for v in (cx, cy, side)) or side <= 0:     # bad detection: plain top square
+        side = min(w, h)
+        cx, cy = w / 2, side / 2
     side = min(side, w, h)
     left = min(max(cx - side / 2, 0), w - side)
     top = min(max(cy - side / 2, 0), h - side)
-    return img.crop((int(left), int(top), int(left + side), int(top + side)))
+    left, top, side = int(round(left)), int(round(top)), int(side)
+    return img.crop((left, top, left + side, top + side))
 
 
 def to_data_uri(img, size: int = 128) -> str:
@@ -153,4 +194,15 @@ def prepare(url: str | None, kind: str) -> str | None:
     """'photo' -> face crop; 'crest' -> whole image. Already-prepared data URIs pass through."""
     if isinstance(url, str) and url.startswith("data:image"):
         return url
-    return face_uri(url) if kind == "photo" else crest_uri(url)
+    if isinstance(url, str) and url.startswith("file:"):        # your own crop: centre square only
+        img = load_image(url)
+        if img is None:
+            return None
+        w, h = img.size
+        side = min(w, h)
+        img = img.crop(((w - side) // 2, 0, (w - side) // 2 + side, side))
+        return to_data_uri(img, size=160)
+    try:
+        return face_uri(url) if kind == "photo" else crest_uri(url)
+    except Exception:            # one odd image must never break the whole chart
+        return None

@@ -55,6 +55,7 @@ TEXTS: dict[str, dict[str, str]] = {
     "src_nba": {"en": "NBA (stats.nba.com)", "es": "NBA (stats.nba.com)"},
     "src_acb": {"en": "Liga Endesa ACB", "es": "Liga Endesa ACB"},
     "src_feb": {"en": "Primera FEB", "es": "Primera FEB"},
+    "src_feb2": {"en": "Segunda FEB", "es": "Segunda FEB"},
     "src_files": {"en": "Your files (any league)", "es": "Tus archivos (cualquier liga)"},
     "src_demo": {"en": "Demo (fictional)", "es": "Demo (ficticio)"},
     "season": {"en": "Season", "es": "Temporada"},
