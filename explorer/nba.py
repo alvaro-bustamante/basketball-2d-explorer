@@ -21,6 +21,15 @@ def logo_png(abbr: str) -> str:
     return PNG_LOGO_URL.format(abbr=ESPN_ABBR.get(abbr, str(abbr).lower()))
 HEADSHOT_URL = "https://cdn.nba.com/headshots/nba/latest/1040x760/{player_id}.png"
 
+# WNBA: same stats.nba.com endpoints with league id "10"; seasons are a single year ("2025").
+WNBA_HEADSHOT_URL = "https://cdn.wnba.com/headshots/wnba/latest/1040x760/{player_id}.png"
+WNBA_LOGO_URL = "https://a.espncdn.com/i/teamlogos/wnba/500/{abbr}.png"
+WNBA_ESPN_ABBR = {"CON": "conn", "LVA": "lv", "LAS": "la", "NYL": "ny", "PHO": "phx", "WAS": "wsh", "GSV": "gs"}
+
+
+def wnba_logo_png(abbr: str) -> str:
+    return WNBA_LOGO_URL.format(abbr=WNBA_ESPN_ABBR.get(abbr, str(abbr).lower()))
+
 
 class NBADataError(RuntimeError):
     pass
@@ -52,34 +61,44 @@ def _with_fg2(df: pd.DataFrame, prefix: str = "") -> pd.DataFrame:
     return out
 
 
-def load_season(season: int, season_type: str = "Regular Season", pause: float = 0.8):
-    """Return (teams, opponents, players) in the app's standard per-game format."""
+def load_season(season: int, season_type: str = "Regular Season", pause: float = 0.8, league: str = "NBA"):
+    """Return (teams, opponents, players) in the app's standard per-game format.
+    league: "NBA" (season 2025 = 2025-26) or "WNBA" (season 2025 = the 2025 summer season)."""
     team_ep, player_ep, static_teams = _endpoints()
-    s = _season_string(season)
+    wnba = league.upper() == "WNBA"
+    s = str(season) if wnba else _season_string(season)
+    lid = {"league_id_nullable": "10" if wnba else "00"}
     try:
         base = team_ep.LeagueDashTeamStats(season=s, season_type_all_star=season_type,
                                            per_mode_detailed="PerGame",
                                            measure_type_detailed_defense="Base",
-                                           timeout=60).get_data_frames()[0]
+                                           timeout=60, **lid).get_data_frames()[0]
         time.sleep(pause)
         oppo = team_ep.LeagueDashTeamStats(season=s, season_type_all_star=season_type,
                                            per_mode_detailed="PerGame",
                                            measure_type_detailed_defense="Opponent",
-                                           timeout=60).get_data_frames()[0]
+                                           timeout=60, **lid).get_data_frames()[0]
         time.sleep(pause)
         plyr = player_ep.LeagueDashPlayerStats(season=s, season_type_all_star=season_type,
                                                per_mode_detailed="PerGame",
-                                               timeout=60).get_data_frames()[0]
+                                               timeout=60, **lid).get_data_frames()[0]
     except Exception as exc:  # network errors, blocks, timeouts
         raise NBADataError(f"stats.nba.com did not answer ({exc}). Try again later, "
                            "or use the CSV export script.") from exc
     if base.empty:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    info = {t["id"]: t for t in static_teams.get_teams()}
+    if wnba:   # no static WNBA team list in nba_api: abbreviations come from the player table
+        abbr = dict(zip(plyr["TEAM_ID"], plyr["TEAM_ABBREVIATION"]))
+        info = {tid: {"abbreviation": abbr.get(tid, str(tid)), "full_name": name}
+                for tid, name in zip(base["TEAM_ID"], base["TEAM_NAME"])}
+        logo, headshot = wnba_logo_png, WNBA_HEADSHOT_URL
+    else:
+        info = {t["id"]: t for t in static_teams.get_teams()}
+        logo, headshot = logo_png, HEADSHOT_URL
     code = base["TEAM_ID"].map(lambda i: info.get(i, {}).get("abbreviation", str(i)))
     ident = pd.DataFrame({"team_code": code, "team_name": base["TEAM_NAME"],
-                          "crest_url": code.map(logo_png),
+                          "crest_url": code.map(logo),
                           "games": base["GP"], "min": base["MIN"]})
     teams = pd.concat([ident, _with_fg2(base)], axis=1)
 
@@ -91,7 +110,7 @@ def load_season(season: int, season_type: str = "Regular Season", pause: float =
         "team_code": plyr["TEAM_ABBREVIATION"],
         "team_name": plyr["TEAM_ABBREVIATION"].map(
             {t["abbreviation"]: t["full_name"] for t in info.values()}),
-        "crest_url": plyr["TEAM_ABBREVIATION"].map(logo_png),
-        "photo_url": plyr["PLAYER_ID"].map(lambda i: HEADSHOT_URL.format(player_id=i)),
+        "crest_url": plyr["TEAM_ABBREVIATION"].map(logo),
+        "photo_url": plyr["PLAYER_ID"].map(lambda i: headshot.format(player_id=i)),
         "games": plyr["GP"], "min": plyr["MIN"]}), _with_fg2(plyr)], axis=1)
     return teams, opp, players

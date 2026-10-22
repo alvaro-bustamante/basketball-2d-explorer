@@ -3,6 +3,8 @@
 Compare **any two basketball metrics** for teams or players, and see **how much of
 each difference is real** thanks to Bayesian uncertainty ellipses.
 Interface in **English and Spanish** (selector at the top of the sidebar).
+**Men's and women's competitions** in the same app (Men / Women switch): EuroLeague, EuroCup, NBA, ACB,
+Primera and Segunda FEB; WNBA and LF Endesa.
 
 Built with Streamlit · Data: official EuroLeague/EuroCup API, NBA (stats.nba.com), or your own files (ACB, Primera FEB, any league).
 

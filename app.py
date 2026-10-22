@@ -37,7 +37,8 @@ SMALL = 10  # font size for all secondary text on the chart
 DATA_DIR = Path("data")
 # Leagues without a public API: read from data/<prefix>_<season>_teams.csv (and _players.csv).
 LOCAL_LEAGUES = {"Liga Endesa ACB": ("ACB", "acb"), "Primera FEB": ("PRIMERA FEB", "primerafeb"),
-                 "Segunda FEB": ("SEGUNDA FEB", "segundafeb")}
+                 "Segunda FEB": ("SEGUNDA FEB", "segundafeb"), "LF Endesa": ("LF ENDESA", "lfendesa")}
+NBA_SOURCES = {"NBA (stats.nba.com)": "NBA", "WNBA (stats.wnba.com)": "WNBA"}
 
 
 def season_label(y: int) -> str:
@@ -50,9 +51,9 @@ def load_api(code: str, season: int, phase: str | None):
 
 
 @st.cache_data(ttl=6 * 3600, show_spinner="Loading NBA data (stats.nba.com)…")
-def load_nba(season: int, season_type: str):
+def load_nba(season: int, season_type: str, league: str = "NBA"):
     from explorer import nba
-    return nba.load_season(season, season_type)
+    return nba.load_season(season, season_type, league=league)
 
 
 @st.cache_data(show_spinner=False)
@@ -74,10 +75,14 @@ def load_demo():
 with st.sidebar:
     set_lang(LANGS[st.selectbox("🌐 Language / Idioma", list(LANGS))])
     st.title("🏀 2D Explorer")
-    SOURCES = {"src_el": "EuroLeague API", "src_ec": "EuroCup API", "src_nba": "NBA (stats.nba.com)",
-               "src_acb": "Liga Endesa ACB", "src_feb": "Primera FEB", "src_feb2": "Segunda FEB",
-               "src_files": "Your files (any league)",
-               "src_demo": "Demo (fictional)"}
+    gender = st.radio(t("gender"), ["men", "women"], horizontal=True, format_func=t)
+    if gender == "men":
+        SOURCES = {"src_el": "EuroLeague API", "src_ec": "EuroCup API", "src_nba": "NBA (stats.nba.com)",
+                   "src_acb": "Liga Endesa ACB", "src_feb": "Primera FEB", "src_feb2": "Segunda FEB",
+                   "src_files": "Your files (any league)", "src_demo": "Demo (fictional)"}
+    else:
+        SOURCES = {"src_wnba": "WNBA (stats.wnba.com)", "src_lfe": "LF Endesa",
+                   "src_files": "Your files (any league)", "src_demo": "Demo (fictional)"}
     source = SOURCES[st.radio(t("data_source"), list(SOURCES), format_func=t)]
     league, game_length = "EUROLEAGUE", 40
     if source in LOCAL_LEAGUES:
@@ -88,14 +93,18 @@ with st.sidebar:
             season = st.selectbox(t("season"), local_seasons, format_func=season_label)
     if source in ("EuroLeague API", "EuroCup API", "NBA (stats.nba.com)"):
         season = st.selectbox(t("season"), list(range(CURRENT_SEASON, 2015, -1)), format_func=season_label)
+    if source == "WNBA (stats.wnba.com)":       # WNBA seasons are a calendar year (May–October)
+        season = st.selectbox(t("season"), list(range(CURRENT_SEASON, 2015, -1)))
     if source in ("EuroLeague API", "EuroCup API"):
         phase_name = st.selectbox(t("phase"), list(api.PHASES))
-    if source == "NBA (stats.nba.com)":
-        league, game_length = "NBA", 48
+    if source in NBA_SOURCES:
+        league = NBA_SOURCES[source]
+        game_length = 48 if league == "NBA" else 40
         season_type = st.selectbox(t("season_type"), ["Regular Season", "Playoffs"])
     if source.startswith("Your files"):
         league = st.selectbox(t("league_names"), ["ACB", "PRIMERA FEB", "SEGUNDA FEB", "NBA", "EUROLEAGUE",
-                                                  "CUSTOM"])
+                                                  "CUSTOM"] if gender == "men" else
+                              ["LF ENDESA", "WNBA", "CUSTOM"])
         game_length = 48 if league == "NBA" else 40
         data_dir = DATA_DIR
         saved = sorted(f.name[:-len("_teams.csv")] for f in data_dir.glob("*_teams.csv")) if data_dir.exists() else []
@@ -142,9 +151,9 @@ try:
     elif source == "EuroCup API":
         teams, opp, players = load_api("U", season, api.PHASES[phase_name])
         context = f"EuroCup {season_label(season)}"
-    elif source == "NBA (stats.nba.com)":
-        teams, opp, players = load_nba(season, season_type)
-        context = f"NBA {season_label(season)} · {season_type}"
+    elif source in NBA_SOURCES:
+        teams, opp, players = load_nba(season, season_type, league)
+        context = (f"NBA {season_label(season)}" if league == "NBA" else f"WNBA {season}") + f" · {season_type}"
     elif source in LOCAL_LEAGUES:
         if not local_seasons:
             how = (("`python personal/scrape_league.py acb --season 2026`" if prefix == "acb" else
@@ -169,8 +178,8 @@ try:
                 values="totals" if values_kind == "Season totals" else "averages")
         else:
             teams, opp, players = spanish.from_game_log(team_file, player_file)
-        context = {"ACB": "Liga Endesa ACB", "PRIMERA FEB": "Primera FEB",
-                   "SEGUNDA FEB": "Segunda FEB"}.get(league, league.title())
+        context = {"ACB": "Liga Endesa ACB", "PRIMERA FEB": "Primera FEB", "SEGUNDA FEB": "Segunda FEB",
+                   "LF ENDESA": "LF Endesa", "WNBA": "WNBA"}.get(league, league.title())
         if file_format == "Saved in data/ folder" and dataset.split("_")[-1].isdigit():
             context += f" {season_label(int(dataset.split('_')[-1]))}"
     else:
@@ -187,9 +196,9 @@ if teams is None or teams.empty:
 # Round reached in this competition: the most games played by any team.
 games_played = int(np.nanmax(pd.to_numeric(teams["games"], errors="coerce")))
 phase_code = api.PHASES.get(phase_name) if source in ("EuroLeague API", "EuroCup API") else None
-playoffs = phase_code == "PO" or (source == "NBA (stats.nba.com)" and season_type == "Playoffs")
+playoffs = phase_code == "PO" or (source in NBA_SOURCES and season_type == "Playoffs")
 auto_round = ("" if not games_played else t("playoffs") if playoffs
-              else f"{t('game_word') if league == 'NBA' else t('round_word')} {games_played}")
+              else f"{t('game_word') if league in ('NBA', 'WNBA') else t('round_word')} {games_played}")
 
 # ───────────────────────────────────────────────────────── build the frame
 team_sel = []
