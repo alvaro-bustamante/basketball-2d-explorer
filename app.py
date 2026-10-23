@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from explorer import api, sources, spanish
+from explorer import api, sources, spanish, warehouse
 from explorer.annotate import BADGE_FONT, badge_fill, leaders, leaders_html
 from explorer.i18n import LANGS, set_lang, smart_upper, t, th, tm
 from explorer.bayes import eb_beta_binomial, eb_normal, ellipse_path, ellipse_scale
@@ -35,9 +35,11 @@ CURRENT_SEASON = 2026
 SHRINK = {"prop": eb_beta_binomial, "normal": eb_normal}
 SMALL = 10  # font size for all secondary text on the chart
 DATA_DIR = Path("data")
-# Leagues without a public API: read from data/<prefix>_<season>_teams.csv (and _players.csv).
+# Leagues without a public API: read from the hoops-warehouse game tables (see explorer/warehouse.py).
 LOCAL_LEAGUES = {"Liga Endesa ACB": ("ACB", "acb"), "Primera FEB": ("PRIMERA FEB", "primerafeb"),
-                 "Segunda FEB": ("SEGUNDA FEB", "segundafeb"), "LF Endesa": ("LF ENDESA", "lfendesa")}
+                 "Segunda FEB": ("SEGUNDA FEB", "segundafeb"), "LF Endesa": ("LF ENDESA", "lfendesa"),
+                 "Basketball Champions League": ("BCL", "bcl"), "FIBA Europe Cup": ("FIBA EUROPE CUP", "fibaeurocup"),
+                 "EuroLeague Women": ("EUROLEAGUE WOMEN", "elwomen")}
 NBA_SOURCES = {"NBA (stats.nba.com)": "NBA", "WNBA (stats.wnba.com)": "WNBA"}
 
 
@@ -66,6 +68,11 @@ def prepared_images(urls: tuple, kind: str, version: int = 0) -> dict:
         return dict(zip(urls, pool.map(lambda u: prepare(u, kind), urls)))
 
 
+@st.cache_data(ttl=600, show_spinner="Loading the warehouse…")
+def load_warehouse(prefix: str, season: int):
+    return warehouse.load(prefix, season)
+
+
 @st.cache_data
 def load_demo():
     return sources.from_demo()
@@ -79,16 +86,16 @@ with st.sidebar:
     if gender == "men":
         SOURCES = {"src_el": "EuroLeague API", "src_ec": "EuroCup API", "src_nba": "NBA (stats.nba.com)",
                    "src_acb": "Liga Endesa ACB", "src_feb": "Primera FEB", "src_feb2": "Segunda FEB",
+                   "src_bcl": "Basketball Champions League", "src_fec": "FIBA Europe Cup",
                    "src_files": "Your files (any league)", "src_demo": "Demo (fictional)"}
     else:
-        SOURCES = {"src_wnba": "WNBA (stats.wnba.com)", "src_lfe": "LF Endesa",
+        SOURCES = {"src_wnba": "WNBA (stats.wnba.com)", "src_lfe": "LF Endesa", "src_elw": "EuroLeague Women",
                    "src_files": "Your files (any league)", "src_demo": "Demo (fictional)"}
     source = SOURCES[st.radio(t("data_source"), list(SOURCES), format_func=t)]
     league, game_length = "EUROLEAGUE", 40
     if source in LOCAL_LEAGUES:
         league, prefix = LOCAL_LEAGUES[source]
-        local_seasons = sorted({int(f.name.split("_")[-2]) for f in DATA_DIR.glob(f"{prefix}_*_teams.csv")
-                                if f.name.split("_")[-2].isdigit()}, reverse=True) if DATA_DIR.exists() else []
+        local_seasons = warehouse.seasons(prefix)
         if local_seasons:
             season = st.selectbox(t("season"), local_seasons, format_func=season_label)
     if source in ("EuroLeague API", "EuroCup API", "NBA (stats.nba.com)"):
@@ -156,16 +163,12 @@ try:
         context = (f"NBA {season_label(season)}" if league == "NBA" else f"WNBA {season}") + f" · {season_type}"
     elif source in LOCAL_LEAGUES:
         if not local_seasons:
-            how = (("`python personal/scrape_league.py acb --season 2026`" if prefix == "acb" else
-                    f"`python personal/scrape_league.py feb --season 2026 --competition {prefix}`")
-                   if Path("personal/scrape_league.py").exists()
-                   else "`python pipelines/import_spanish_stats.py` (see the README)")
-            st.info(t("no_local", source=source, how=how))
+            st.info(t("no_local", source=source,
+                      how=f"`python personal/update.py --only {prefix}` (hoops-warehouse)"))
             st.stop()
-        players_path = DATA_DIR / f"{prefix}_{season}_players.csv"
-        teams, opp, players = sources.from_csv(DATA_DIR / f"{prefix}_{season}_teams.csv",
-                                               players_path if players_path.exists() else None)
-        context = f"{source} {season_label(season)}"
+        teams, opp, players = load_warehouse(prefix, season)
+        context = f"{source} {season_label(season)}" + (" · Data: FIBA" if prefix in ("bcl", "fibaeurocup", "elwomen")
+                                                        else " · Data: ACB" if prefix == "acb" else " · Data: FEB")
     elif source.startswith("Your files"):
         if team_file is None or (file_format.startswith("Season tables") and opp_file is None):
             st.info(t("upload_first"))
@@ -508,4 +511,6 @@ if SOCIAL_EXPORT:
             "estimate": estimate, "ci_level": ci_level if show_ellipses else None,
             "note_texts": {"Observed": t("export_obs"), "Bayes-adjusted": t("export_adj"),
                            "ellipses": t("export_ell", level=ci_level)},
+            "x_help": th(mx.label, mx.help), "y_help": th(my.label, my.help),
+            "better_x": mx.better, "better_y": my.better, "names": list(full_names),
         })

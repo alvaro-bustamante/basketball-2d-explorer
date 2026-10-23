@@ -58,6 +58,9 @@ TEXTS: dict[str, dict[str, str]] = {
     "src_feb2": {"en": "Segunda FEB", "es": "Segunda FEB"},
     "src_wnba": {"en": "WNBA (stats.wnba.com)", "es": "WNBA (stats.wnba.com)"},
     "src_lfe": {"en": "LF Endesa", "es": "LF Endesa"},
+    "src_bcl": {"en": "Basketball Champions League", "es": "Basketball Champions League"},
+    "src_fec": {"en": "FIBA Europe Cup", "es": "FIBA Europe Cup"},
+    "src_elw": {"en": "EuroLeague Women", "es": "EuroLeague Women"},
     "gender": {"en": "Competition", "es": "Competición"},
     "men": {"en": "Men", "es": "Masculina"},
     "women": {"en": "Women", "es": "Femenina"},
@@ -96,8 +99,12 @@ TEXTS: dict[str, dict[str, str]] = {
     "compare": {"en": "Compare", "es": "Comparar"},
     "teams": {"en": "Teams", "es": "Equipos"},
     "players": {"en": "Players", "es": "Jugadores"},
-    "no_local": {"en": "No {source} data yet. Create it with {how}; files are saved in data/.",
-                 "es": "Aún no hay datos de {source}. Créalos con {how}; los archivos se guardan en data/."},
+    "no_local": {"en": "No {source} data found in the warehouse. Create it with {how}. The app looks for the "
+                       "warehouse next to this project (../hoops-warehouse/data/warehouse) or in the folder set in "
+                       "HOOPS_WAREHOUSE.",
+                 "es": "No hay datos de {source} en el warehouse. Créalos con {how}. La app busca el warehouse junto "
+                       "a este proyecto (../hoops-warehouse/data/warehouse) o en la carpeta indicada en "
+                       "HOOPS_WAREHOUSE."},
     "upload_first": {"en": "Upload your files in the sidebar to start. Season tables need two files: "
                            "your teams' own stats and their opponents' stats.",
                      "es": "Sube tus archivos en la barra lateral para empezar. Las tablas de temporada necesitan dos "

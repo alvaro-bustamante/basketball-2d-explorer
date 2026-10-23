@@ -4,7 +4,9 @@ Compare **any two basketball metrics** for teams or players, and see **how much 
 each difference is real** thanks to Bayesian uncertainty ellipses.
 Interface in **English and Spanish** (selector at the top of the sidebar).
 **Men's and women's competitions** in the same app (Men / Women switch): EuroLeague, EuroCup, NBA, ACB,
-Primera and Segunda FEB; WNBA and LF Endesa.
+Primera and Segunda FEB, Basketball Champions League, FIBA Europe Cup; WNBA, LF Endesa and EuroLeague Women.
+FIBA competitions (and national-team events such as EuroBasket) are read from the public FIBA game pages
+with a local script; their box scores are rebuilt from the play-by-play and checked against the final score.
 
 Built with Streamlit · Data: official EuroLeague/EuroCup API, NBA (stats.nba.com), or your own files (ACB, Primera FEB, any league).
 
@@ -37,7 +39,13 @@ so you can tell signal from noise before making a decision.
 
 ## Leagues without an API (ACB, Primera FEB…)
 
-`explorer/spanish.py` reads stats tables you save yourself or that a club provides:
+**From a warehouse.** The app reads ACB, FEB and FIBA competitions from the per-game tables of a
+hoops-warehouse folder (`<comp>_<season>_team_games.csv` and
+`_player_games.csv`). It looks for it next to this project (`../hoops-warehouse/data/warehouse`),
+or in the folder given by the environment variable `HOOPS_WAREHOUSE` or by `warehouse_dir` in
+`.streamlit/secrets.toml`. This app does not download anything from those leagues itself.
+
+**From your own files.** `explorer/spanish.py` reads stats tables you save yourself or that a club provides:
 an HTML page saved from the browser, Excel or CSV, with Spanish headers (PJ, MIN, PTS, T2, T3,
 TL, RO, RD, AS, BR, BP, TAP, FC, VAL) or English ones. Two layouts:
 

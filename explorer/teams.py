@@ -105,7 +105,8 @@ def _plain(text: str) -> str:
 
 def _entry(code: str, name: str | None, league: str):
     entry = _table(league).get(str(code).upper())
-    if entry is None and name and league.upper() in ("ACB", "PRIMERA FEB", "SEGUNDA FEB", "LF ENDESA", "CUSTOM"):
+    if entry is None and name and league.upper() in ("ACB", "PRIMERA FEB", "SEGUNDA FEB", "LF ENDESA", "BCL", "FIBA EUROPE CUP",
+                                                    "EUROLEAGUE WOMEN", "CUSTOM"):
         plain = _plain(name)
         entry = next((e for k, e in NAME_KEYWORDS if k in plain), None)
     return entry
