@@ -84,6 +84,23 @@ NAME_KEYWORDS = [
     ("andorra", ("#00205B", "#FFD100", "Andorra")),
     ("lleida", ("#00A3E0", "#FFFFFF", "Lleida")),
     ("coruna", ("#0057A8", "#FFFFFF", "Coruña")),
+    # Primera FEB
+    ("estudiantes", ("#1E5BA8", "#FFFFFF", "Estudiantes")),
+    ("albacete", ("#C8102E", "#FFFFFF", "Albacete")),
+    ("palencia", ("#6B2C91", "#FFFFFF", "Palencia")),
+    ("alicante", ("#0057A8", "#FFFFFF", "Alicante")),
+    ("fuenlabrada", ("#F5A800", "#00205B", "Fuenlabrada")),
+    ("fibwi", ("#B5121B", "#000000", "Fibwi Palma")),
+    ("palmer", ("#00A0DF", "#FFFFFF", "Palmer Palma")),
+    ("cordoba", ("#00843D", "#FFFFFF", "Córdoba")),
+    ("zamora", ("#7A1F3D", "#FFFFFF", "Zamora")),
+    ("gipuzkoa", ("#0072CE", "#FFFFFF", "Gipuzkoa")),
+    ("caja 87", ("#E4002B", "#FFFFFF", "Caja 87")),
+    ("tizona", ("#7B2D8E", "#FFFFFF", "Tizona Burgos")),
+    ("ourense", ("#D71920", "#FFFFFF", "Ourense")),
+    ("oviedo", ("#0098D8", "#FFFFFF", "Oviedo")),
+    ("cantabria", ("#00873E", "#FFFFFF", "Cantabria")),
+    ("menorca", ("#E35205", "#FFFFFF", "Menorca")),
 ]
 
 # Distinct colors for teams with no entry (any league), assigned by team code.
